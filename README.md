@@ -1,0 +1,167 @@
+# PetStay · 知华宠物寄养、上门喂养与报价撮合平台
+
+[中文](README.md) | [English](README.en.md)
+
+**知华科技（上海如静知华信息科技有限公司）** · [官网](https://www.zhuatech.cn/) · **公开源码学习版／非商业源码版**。
+
+PetStay把宠物档案、寄养与上门需求、照护方档期、报价选择、每日照护记录和双方交接放在同一个平台。Java 21 / Spring Boot、Vue 3、MySQL 8及Docker Compose；手机H5与桌面运营后台共用真实数据库。适合学习宠物服务撮合、服务容量管理、订单快照和私有证据管理，也可作为获得商业授权后的定制开发基础。
+
+## 从需求到交接
+
+1. 宠物主注册，填写私有联系资料、猫犬档案，发布寄养或每天一个时段的上门需求。
+2. 照护者提交服务资料，运营审核后发布档期。匹配按城市／地区、类型、物种、体重、日期与真实容量筛选。
+3. 照护者提出48小时有效报价；主人选择时再次核验并冻结价格、宠物和双方资料，生成订单与每日任务。
+4. 指定照护者开始、完成任务、追加修订及私有照片，提交交接；主人确认或提出争议，保留往返记录。
+5. 线下收退有原单关联和金额上限；完成后主人评价，经审核才公开。平台不扣款或代收资金。
+
+## 已实现模块
+
+| 使用端 | 功能 |
+|---|---|
+| 公开手机网页 | 真实审核照护目录、地区／日期／类型筛选、服务详情、已审核评价、中英文切换 |
+| 宠物主 | 注册登录、资料／宠物管理、需求草稿与发布、匹配候选、报价选择、私有订单、交接确认／争议、评价、CSV |
+| 照护者 | 服务资料审核、档期／容量、符合条件需求、报价及撤回、每日任务、追加修订、私有图片、线下收退登记 |
+| 运营 | 服务资料／评价审核、范围内订单、统计与审计 |
+| 管理 | 账号、角色、团队、菜单权限、系统设置、字典、实时身份复核；公开会员角色与最后管理员保护 |
+
+会员可以同时做主人和申请照护方。服务资料审核不代表实名、兽医、保险或资质认证。准确地址、私有联系资料和照护说明只向确认订单参与方及授权运营人员开放。
+
+## 真实运行页面
+
+以下截图来自独立TEST数据库，名称、地址、联系说明及评价均标为TEST，不代表营业门店或真实客户。图片验收素材使用品牌图并明确标注“不是宠物照片”。
+
+### 登录入口：会员与照护者共用账号
+
+![登录入口](docs/screenshots/02-login.jpg)
+
+### 服务目录：真实筛选及审核资料
+
+![服务目录](docs/screenshots/01-market.jpg)
+
+### 宠物档案：猫犬、体重及私有照护说明
+
+![宠物档案](docs/screenshots/03-pets.jpg)
+
+### 需求详情：匹配候选与实际报价
+
+![需求撮合](docs/screenshots/04-matching.jpg)
+
+### 订单交接：任务、照片、记录及冻结资料
+
+![照护订单](docs/screenshots/05-order.jpg)
+
+### 运营审核与统计：实际平台记录
+
+![运营审核](docs/screenshots/06-operations.jpg)
+
+![运营统计](docs/screenshots/07-reports.jpg)
+
+### 账号权限与系统设置
+
+![角色权限](docs/screenshots/08-roles.jpg)
+
+![系统设置](docs/screenshots/09-settings.jpg)
+
+### 手机H5：390×844浏览器尺寸
+
+![手机照护入口](docs/screenshots/10-mobile.jpg)
+
+## 架构与目录
+
+浏览器 → Nginx同源代理 → Spring Boot业务／权限服务 → MySQL；Flyway迁移，JPA验证表结构。照护图片保存在数据库并实际解码、去除EXIF；备份同时保留图片和订单快照。业务写入通过平台团队行锁与version控制，针对单主体、单应用实例及低容量使用。
+
+```text
+backend/                 Java 21、Spring Boot 4.0.7、业务与身份接口
+  src/main/resources/db/migration/  V1身份、V2宠物撮合与照护
+  src/test/              业务、权限、照片及真实HTTP集成测试
+frontend/                Vue 3.5.43、Vite 8.1.5、手机与桌面界面
+  public/brand/          正式LOGO
+scripts/                 初始化环境、测试、备份、全新实例恢复与发布检查
+docs/                    业务、接口、部署、安全、操作和微信H5说明
+compose.yaml             MySQL 8.4、后端、Nginx前端
+.env.example             配置名称，不包含真实凭据
+LICENSE / NOTICE         自有非商业许可／第三方说明
+```
+
+## 环境与安装启动
+
+Docker Engine、Compose v2、Python 3.10+；建议4核、8GiB内存及10GiB空闲空间。独立源码开发需Java 21、Maven 3.9+、Node **24.19.0**与npm，首次构建需要可访问官方依赖仓库。
+
+在仓库根目录执行：
+
+```sh
+python3 scripts/init-env.py
+docker compose -p petstay config --quiet
+docker compose -p petstay up -d --build --wait --wait-timeout 240
+```
+
+访问 http://127.0.0.1:8136/ ，健康检查 http://127.0.0.1:8136/actuator/health 。初始化脚本拒绝覆盖已有.env；随机密码仅保存在本机.env（0600），不打印、不提交。管理员名默认admin，密码读取ADMIN_PASSWORD，**没有固定公开密码**。已有账号密码不会被环境变量覆盖。构建后端必跑测试，前端必跑格式、lint、测试和构建。
+
+### 数据库初始化与升级
+
+全新MySQL卷自动创建数据库、执行 `V1__identity.sql` 和 `V2__pet_marketplace.sql`，初始化管理员、角色、权限、菜单、字典及设置。**不自动创建业务假数据**。迁移位于 `backend/src/main/resources/db/migration/`；没有重复执行的业务初始化脚本。升级前备份并试恢复，用新增版本迁移，禁止修改已执行版本；Hibernate仅validate。
+
+### 环境变量
+
+| 名称 | 说明 |
+|---|---|
+| MYSQL_ROOT_PASSWORD / DATABASE_PASSWORD | 独立数据库强密码，由初始化脚本生成 |
+| ADMIN_USERNAME / ADMIN_PASSWORD | 首次管理员名及强密码（12–72 UTF-8字节，大小写与数字） |
+| WEB_PORT / BIND_ADDRESS | 默认8136／127.0.0.1；避免与其他项目端口冲突 |
+| COOKIE_SECURE | 本地false，HTTPS公网必须true |
+| DATABASE_URL / DATABASE_USER | 可选外部MySQL；需证书验证与可信CA，详见部署说明 |
+
+## 测试与验证
+
+```sh
+mvn -B -f backend/pom.xml spotless:check clean verify
+cd frontend
+npm ci --no-audit --no-fund
+npm run format:check
+npm run lint
+npm test
+npm run build
+cd ..
+python3 -m venv .venv
+.venv/bin/pip install -r scripts/requirements-quality.txt
+.venv/bin/python -m black --check scripts
+.venv/bin/python -m py_compile scripts/*.py
+python3 scripts/release-check.py
+git diff --check
+```
+
+独立空TEST实例（不得对已有业务库执行seed），创建受限状态文件：
+
+```sh
+python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /private/tmp/petstay-quality-state.json
+```
+
+脚本验证注册越权拒绝、匹配与报价、并发选定、容量、快照、状态、任务修订、私有图片、争议、线下原单退款、评价和权限。状态文件含临时凭据，禁止提交。`capture`／`compare`用于重启及恢复前后全量可见数据和图片哈希核对，详见 [验收记录](docs/verification.md)。后端32项、前端10项和MySQL闭环233项为已执行检查；不替代公网、实机或生产负载验收。
+
+## 部署、备份与常见问题
+
+[部署与恢复](docs/deployment.md)包含HTTPS、独立域名、环境配置、受限备份和全新实例恢复。备份包含私有资料，脚本短暂停止指定后端、保留图片二进制，禁止公开上传。密码弱或端口冲突会导致启动失败，应查看本项目日志；镜像下载失败先检查网络，不删除原数据卷。会话30分钟或服务重启会重新登录；版本冲突先刷新核对再提交。
+
+手机布局已提供；公众号账号、HTTPS域名和实际微信设备准备后可接入H5链接。**当前未部署公网、未接入微信登录／支付、未提供原生小程序**。详见 [手机H5与微信接入](docs/wechat-H5.md)。
+
+## 安全与已知限制
+
+BCrypt、HttpOnly Session、CSRF、实时账号／角色校验、登录与注册节流、版本锁、私有照片及CSV权限已实现。照片≤2MiB、6000边长、9百万像素，每订单20张。管理员不能冒充订单双方。详见 [安全说明](docs/security.md)及 [业务边界](docs/business.md)。
+
+一份需求一只猫／犬、一个地区和一种服务；寄养1–30晚，上门1–14天，每天固定上午／下午／晚间一个窗口。地区匹配不提供GPS距离或AI。提前结束不自动重算固定价；验收前不释放容量。没有短信、实时聊天、线上支付／托管／分账、保险、专业医疗或身份认证。单实例内存Session、写事务平台行锁及列表上限不适合未经评估直接多实例／高并发运行。未验证生产可用性，也无真实用户运营指标。
+
+## 授权、贡献与反馈
+
+仅限个人学习交流；未经上海如静知华信息科技有限公司书面授权不得商用。**源码公开、非商业使用**，不是MIT／Apache免费商用许可。README、页面及 [LICENSE](LICENSE)口径一致，第三方版权保留于 [NOTICE](NOTICE)。不提供医疗、服务质量或商业运营担保。商业使用与部署需另行获得授权。
+
+欢迎通过Issue／PR反馈可复现问题，说明版本、步骤及脱敏日志，修改前阅读 [AGENTS.md](AGENTS.md)。安全漏洞请私下联系，勿在公开Issue贴密钥、客户资料或利用细节。
+
+## 联系知华科技
+
+本项目由知华科技（上海如静知华信息科技有限公司）提供公开源码学习版本，主要用于个人学习、技术研究与非商业交流。未经书面授权不得商用。企业信息化建设、中小企业数字化转型、中小企业 AI 转型、私有化部署、软件外包、软件项目外包、软件实施、FDE 外包、OPC 技术支持及深度定制开发，请访问知华科技官网 https://www.zhuatech.cn/，或添加微信 zhuatech、zhuatech2 咨询。
+
+**商业授权或深度定制开发请联系知华科技。** [官网](https://www.zhuatech.cn/) · 微信 **zhuatech**、**zhuatech2**。
+
+| 微信 zhuatech | 微信 zhuatech2 |
+|---|---|
+| ![微信 zhuatech](docs/images/wechat-zhuatech.png) | ![微信 zhuatech2](docs/images/wechat-zhuatech2.png) |

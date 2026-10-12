@@ -1,0 +1,12 @@
+PetStay 1.0.0
+Copyright 2026 上海如静知华信息科技有限公司
+https://www.zhuatech.cn/ · 商业咨询微信 zhuatech / zhuatech2
+
+自有源码按根目录 LICENSE 提供非商业学习许可。身份、后台目录、请求客户端、构建和备份基础复用本公司 ApiaryFlow／RecipeFlow 自有源码；宠物照护撮合、报价、订单、任务、私有照片与公众页面由 PetStay 实现。
+
+Vue / Vite / plugin-vue / ESLint / globals / Prettier: retain package-distributed MIT notices.
+Lucide (@lucide/vue): retain ISC notices and applicable MIT icon notices distributed with the package.
+Spring Boot / Spring Security / Spring Data / Flyway: retain distributed Apache-2.0 notices.
+MySQL Connector/J: retain distributed GPL-2.0 and Universal FOSS Exception notices.
+H2 test dependency: retain distributed MPL-2.0/EPL-1.0 notices.
+Docker images (Maven, Eclipse Temurin, Node, Nginx, MySQL) carry additional third-party notices. This file is an attribution index, not a replacement license. Review dependency and image distributions before redistribution.
