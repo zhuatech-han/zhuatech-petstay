@@ -68,6 +68,7 @@ class MarketIntegrationTest {
 
   @Autowired MockMvc mvc;
   @Autowired MutableClock time;
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
   final JsonMapper json = JsonMapper.builder().build();
   MockHttpSession root, owner, provider, other;
   long pet, providerId;
@@ -1004,5 +1005,184 @@ class MarketIntegrationTest {
         "POST",
         m("version", version(provider, "orders", id), "note", "TEST unfinished"),
         409);
+  }
+
+  /** 只复制本测试合成记录，用于验证大量历史不会影响活动额度。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  long cloneHistory(String table, long source, Map<String, Object> changes) {
+    assertTrue(Set.of("care_request", "care_offer", "care_order").contains(table));
+    var fields =
+        new LinkedHashMap<>(jdbc.queryForMap("select * from " + table + " where id=?", source));
+    fields.remove("id");
+    fields.putAll(changes);
+    var keys = new org.springframework.jdbc.support.GeneratedKeyHolder();
+    var values = fields.values().toArray();
+    jdbc.update(
+        connection -> {
+          var statement =
+              connection.prepareStatement(
+                  "insert into "
+                      + table
+                      + " ("
+                      + String.join(",", fields.keySet())
+                      + ") values ("
+                      + String.join(",", Collections.nCopies(values.length, "?"))
+                      + ")",
+                  java.sql.Statement.RETURN_GENERATED_KEYS);
+          for (int n = 0; n < values.length; n++) statement.setObject(n + 1, values[n]);
+          return statement;
+        },
+        keys);
+    return keys.getKey().longValue();
+  }
+
+  @Test
+  void fiveThousandHistoricalOrdersHaveScopedPagingAndAllowNewBusiness() throws Exception {
+    long id = booked();
+    var original = jdbc.queryForMap("select * from care_order where id=?", id);
+    long requestId = ((Number) original.get("request_id")).longValue();
+    long offerId = ((Number) original.get("offer_id")).longValue();
+    jdbc.update("update care_order set status='COMPLETED' where id=?", id);
+    for (int n = 0; n < 5000; n++) {
+      long r = cloneHistory("care_request", requestId, Map.of());
+      long offer = cloneHistory("care_offer", offerId, Map.of("request_id", r));
+      cloneHistory(
+          "care_order",
+          id,
+          Map.of("request_id", r, "offer_id", offer, "reference", "TEST_HIST_" + suffix + "_" + n));
+    }
+    var first = get(owner, "/orders/page?size=12");
+    assertEquals(5001, first.path("total").asLong());
+    assertEquals(12, first.path("items").size());
+    assertFalse(first.path("items").get(0).has("snapshot"));
+    var second = get(owner, "/orders/page?page=2&size=12");
+    assertNotEquals(first.path("items").get(0).path("id"), second.path("items").get(0).path("id"));
+    assertEquals(0, get(other, "/orders/page").path("total").asLong());
+    assertEquals(5001, get(provider, "/orders/page?status=COMPLETED").path("total").asLong());
+    assertEquals(
+        1, get(owner, "/orders/page?q=TEST_HIST_" + suffix + "_4999").path("total").asLong());
+    assertEquals(0, get(owner, "/orders/page?q=%25").path("total").asLong());
+    assertEquals(417, get(owner, "/orders/page?page=9999").path("page").asInt());
+    denied(owner, "/orders/page?size=51", "GET", Map.of(), 400);
+    var availability = get(provider, "/provider").path("availability");
+    long previousId = 0;
+    for (var slot : availability) {
+      assertTrue(slot.path("id").asLong() > previousId);
+      previousId = slot.path("id").asLong();
+    }
+    long next = booked();
+    assertEquals("CONFIRMED", get(owner, "/orders/" + next).path("order").path("status").asText());
+  }
+
+  @Test
+  void dictionaryRejectsUnsupportedTypesAndDetectsStaleEdits() throws Exception {
+    denied(
+        root,
+        "/admin/dictionaries",
+        "POST",
+        m("code", "BIRD", "name", "TEST鸟", "nameEn", "TEST Bird", "enabled", true),
+        409);
+    var rows = get(root, "/admin/dictionaries");
+    JsonNode cat = null;
+    for (var row : rows) if (row.path("code").asText().equals("CAT")) cat = row;
+    assertNotNull(cat);
+    long id = cat.path("id").asLong(), ver = cat.path("version").asLong();
+    var body =
+        m(
+            "code",
+            "CAT",
+            "name",
+            cat.path("name").asText(),
+            "nameEn",
+            cat.path("nameEn").asText(),
+            "enabled",
+            true,
+            "version",
+            ver);
+    var changed = ok(root, "/admin/dictionaries/" + id, "PUT", body);
+    assertEquals(ver + 1, changed.path("version").asLong());
+    denied(root, "/admin/dictionaries/" + id, "PUT", body, 409);
+    for (var row : get(owner, "/options").path("species"))
+      assertTrue(Set.of("CAT", "DOG").contains(row.path("code").asText()));
+  }
+
+  /** 实际HTTP上传测试图，不伪造文件格式或真实客户照片。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  MvcResult uploadTestPhoto(long id) throws Exception {
+    byte[] image =
+        Base64.getDecoder()
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLaQAAAAASUVORK5CYII=");
+    return mvc.perform(
+            multipart("/api/orders/" + id + "/photos")
+                .file(new MockMultipartFile("file", "TEST.png", "image/png", image))
+                .param("version", Long.toString(version(provider, "orders", id)))
+                .param("caption", "TEST格式验收图，不是宠物照片")
+                .session(provider)
+                .with(csrf()))
+        .andReturn();
+  }
+
+  @Test
+  void thirtyNightBoardingCanKeepDailyPhotosWithoutLosingOldBytes() throws Exception {
+    var availability = get(provider, "/provider").path("availability");
+    for (var row : availability)
+      if (row.path("kind").asText().equals("BOARDING")) {
+        ok(
+            provider,
+            "/availability/" + row.path("id").asLong(),
+            "PUT",
+            m(
+                "version",
+                row.path("version").asLong(),
+                "kind",
+                "BOARDING",
+                "visitWindow",
+                "NIGHT",
+                "startsOn",
+                "2026-10-12",
+                "endsOn",
+                "2026-11-11"));
+      }
+    long request = request(owner, pet, "BOARDING", "NIGHT", "2026-10-12", "2026-11-11");
+    long id = select(owner, request, quote(request));
+    action(provider, id, "start");
+    String firstHash = null;
+    long firstId = 0;
+    for (int day = 0; day < 30; day++) {
+      time.now = Instant.parse("2026-10-12T04:00:00Z").plus(Duration.ofDays(day));
+      var upload = uploadTestPhoto(id);
+      assertEquals(200, upload.getResponse().getStatus());
+      var photo = json.readTree(upload.getResponse().getContentAsString());
+      if (day == 0) {
+        firstHash = photo.path("sha256").asText();
+        firstId = photo.path("id").asLong();
+      }
+      assertEquals(1, get(owner, "/orders/" + id + "/photo-allowance").path("dailyCount").asInt());
+    }
+    assertEquals(30, get(owner, "/orders/" + id).path("photos").size());
+    var bytes =
+        result(owner, "/orders/" + id + "/photos/" + firstId, "GET", Map.of())
+            .getResponse()
+            .getContentAsByteArray();
+    assertEquals(
+        firstHash,
+        HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)));
+    assertEquals(
+        30L * bytes.length,
+        get(owner, "/orders/" + id + "/photo-allowance").path("totalBytes").asLong());
+    denied(other, "/orders/" + id + "/photo-allowance", "GET", Map.of(), 403);
+  }
+
+  @Test
+  void dailyPhotoLimitResetsAtShanghaiMidnight() throws Exception {
+    long id = booked();
+    action(provider, id, "start");
+    time.now = Instant.parse("2026-10-12T15:59:59Z");
+    for (int n = 0; n < 5; n++) assertEquals(200, uploadTestPhoto(id).getResponse().getStatus());
+    assertEquals(409, uploadTestPhoto(id).getResponse().getStatus());
+    time.now = Instant.parse("2026-10-12T16:00:00Z");
+    assertEquals(
+        "2026-10-13", get(owner, "/orders/" + id + "/photo-allowance").path("date").asText());
+    assertEquals(0, get(owner, "/orders/" + id + "/photo-allowance").path("dailyCount").asInt());
+    assertEquals(200, uploadTestPhoto(id).getResponse().getStatus());
   }
 }
