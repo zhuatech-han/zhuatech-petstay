@@ -18,4 +18,6 @@
 
 ## 迁移与初始化
 
-`backend/src/main/resources/db/migration/V1__identity.sql` 和 `V2__pet_marketplace.sql` 启动自动执行；Hibernate只validate，不自动改表。首次启动创建管理员、运营角色、会员角色、菜单、权限、字典与设置，不创建假会员、营业门店或照护订单。没有独立重复执行的业务初始化SQL。升级先备份，新增版本迁移，禁止改写已执行版本。
+`backend/src/main/resources/db/migration/`内的V1、V2及V3启动自动执行；Hibernate只validate，不自动改表。首次启动创建管理员、运营角色、会员角色、菜单、权限、字典与设置，不创建假会员、营业门店或照护订单。没有独立重复执行的业务初始化SQL。升级先备份，新增版本迁移，禁止改写已执行版本。
+
+V3只新增订单与照片查询索引及字典版本字段，保留V1/V2原文；不覆盖旧订单快照、照片字节和线下款项。
