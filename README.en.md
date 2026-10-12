@@ -4,7 +4,7 @@
 
 **ZhiHua Technology (Shanghai Rujing Zhihua Information Technology Co., Ltd.)** · [Official website](https://www.zhuatech.cn/) · **Public source learning edition / non-commercial source edition**.
 
-PetStay brings pet profiles, boarding and home visit requests, provider availability, quote selection, daily care records and two-party handover into one platform. Built with Java 21 / Spring Boot, Vue 3, MySQL 8 and Docker Compose, its mobile H5 and desktop operations interface use a real shared database. It supports learning about pet service marketplaces, service capacity, frozen order snapshots and private evidence, and can serve as a customization foundation after obtaining commercial authorization.
+Current version: **1.1.0**. PetStay brings pet profiles, boarding and home visit requests, provider availability, quote selection, daily care records and two-party handover into one platform. Built with Java 21 / Spring Boot, Vue 3, MySQL 8 and Docker Compose, its mobile H5 and desktop operations interface use a real shared database. It supports learning about pet service marketplaces, service capacity, frozen order snapshots and private evidence, and can serve as a customization foundation after obtaining commercial authorization.
 
 ## Request to handover
 
@@ -26,9 +26,17 @@ PetStay brings pet profiles, boarding and home visit requests, provider availabi
 
 A member may be both owner and provider applicant. Service information review is not identity, veterinary, insurance or professional certification. Exact addresses, private contacts and care instructions are disclosed only to confirmed order participants and authorized operators.
 
+## 1.1 Record capacity and usability
+
+Order search and paging use database authorization scopes. Completed and cancelled orders do not consume unfinished-order capacity. Photos allow five per Shanghai upload date and 100 MiB per booking, with visible quotas and the existing 2 MiB file limit. Only cats and dogs can be enabled. Dictionary edits check versions, and offer withdrawal and availability deletion have separate explanations.
+
+Provider quote history can be filtered by request number and status, with 12 rows per page. Its legacy API retains a 10,000-row bound; it is not an unlimited query.
+
+Multi-user shop scheduling, actual check-in/check-out, automatic incident notifications, email/SMS, account recovery and online payment are not implemented. This version has not passed multi-user operational acceptance.
+
 ## Actual running pages
 
-Screenshots use an isolated TEST database. Names, addresses, contact notes and reviews are marked TEST; they are not real businesses or customers. The image validation fixture is a brand image explicitly labeled as not a pet photo.
+Screenshots use an isolated TEST database containing 5,000 synthetic historical records for paging checks. Names, addresses, contact notes and reviews are marked TEST; they are not real businesses or customers. The image validation fixture is a brand image explicitly labeled as not a pet photo.
 
 ### Account entry — members and providers share an account
 
@@ -66,13 +74,17 @@ Screenshots use an isolated TEST database. Names, addresses, contact notes and r
 
 ![Mobile H5](docs/screenshots/10-mobile.jpg)
 
+### Order search — authorized paging over synthetic history
+
+![Order paging](docs/screenshots/13-order-paging.jpg)
+
 ## Architecture and directories
 
 Browser → same-origin Nginx proxy → Spring Boot business/authorization services → MySQL. Flyway applies migrations; JPA validates schema. Care images are decoded, stripped of EXIF and persisted in the database; backups retain images and frozen order snapshots. A platform team-row lock and version checks serialize business writes for one operator, one application instance and low-volume use.
 
 ```text
 backend/                  Java 21 / Spring Boot 4.0.7, business and identity APIs
-  src/main/resources/db/migration/  V1 identity, V2 pet matching and care
+  src/main/resources/db/migration/  V1 identity, V2 care, V3 paging and dictionary versions
   src/test/               Rules, permissions, image safety and real HTTP integration
 frontend/                 Vue 3.5.43 / Vite 8.1.5, mobile and desktop UI
   public/brand/           Official logo
@@ -99,7 +111,7 @@ Open http://127.0.0.1:8136/ ; health: http://127.0.0.1:8136/actuator/health . In
 
 ### Database initialization and upgrades
 
-A new MySQL volume creates the database, executes `V1__identity.sql` and `V2__pet_marketplace.sql`, then initializes administrator, roles, permissions, menus, dictionaries and settings. **No fabricated business seed data.** Migrations live at `backend/src/main/resources/db/migration/`; no separate repeatedly executed business initialization script. Back up and test restore before upgrades; add migrations instead of modifying applied versions. Hibernate only validates.
+A new MySQL volume creates the database, executes `V1__identity.sql` , `V2__pet_marketplace.sql` and `V3__order_paging_and_photo_allowance.sql`, then initializes administrator, roles, permissions, menus, dictionaries and settings. **No fabricated business seed data.** Migrations live at `backend/src/main/resources/db/migration/`; no separate repeatedly executed business initialization script. Back up and test restore before upgrades; add migrations instead of modifying applied versions. Hibernate only validates.
 
 ### Configuration
 
@@ -126,7 +138,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-quality.txt
 .venv/bin/python -m black --check scripts
 .venv/bin/python -m py_compile scripts/*.py
-python3 scripts/release-check.py
+.venv/bin/python scripts/release-check.py
 git diff --check
 ```
 
@@ -136,7 +148,7 @@ Only against an isolated empty TEST instance, with a restricted state file:
 python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /private/tmp/petstay-quality-state.json
 ```
 
-The script verifies registration privilege rejection, matching and quotes, concurrent selection, capacity, snapshots, states, task corrections, private images, disputes, original receipt refunds, reviews and authorization. The state file contains temporary credentials and must never be published. `capture`/`compare` check all visible business data and image hashes across restart and restore; see [validation record](docs/verification.md). Executed checks include 32 backend tests, 10 frontend tests and 233 MySQL workflow assertions. These do not certify public deployment, physical devices or production load.
+The script verifies registration privilege rejection, matching and quotes, concurrent selection, capacity, snapshots, states, task corrections, private images, disputes, original receipt refunds, reviews and authorization. The state file contains temporary credentials and must never be published. `capture`/`compare` check all visible business data and image hashes across restart and restore; see [validation record](docs/verification.md). Executed checks include 37 backend tests, 10 frontend tests and 233 MySQL workflow assertions. These do not certify public deployment, physical devices or production load.
 
 ## Deployment, backup and troubleshooting
 
@@ -146,9 +158,9 @@ Responsive mobile layout is implemented. A prepared public account, HTTPS domain
 
 ## Security and known limitations
 
-BCrypt, HttpOnly sessions, CSRF, live identity/role checks, registration/login throttling, versions and private image/CSV authorization are implemented. Images: ≤2MiB, 6000px edge, 9 million pixels and 20 per order. Administrators cannot impersonate either party. See [security](docs/security.md) and [business rules](docs/business.md).
+BCrypt, HttpOnly sessions, CSRF, live identity/role checks, registration/login throttling, versions and private image/CSV authorization are implemented. Images: ≤2MiB, 6000px edge, 9 million pixels and 5 per order per Shanghai upload date, with 100 MiB per order; existing photos remain. Administrators cannot impersonate either party. See [security](docs/security.md) and [business rules](docs/business.md).
 
-One request covers one cat/dog, one area and one service type. Boarding: 1–30 nights; visits: 1–14 days with one fixed morning/afternoon/evening window per day. Area matching has no GPS distance or AI. Early finish does not recalculate the fixed quote, and capacity remains reserved until acceptance. No SMS, live chat, online payments/escrow/split settlements, insurance, medical care or identity verification. In-memory sessions, a platform write lock and list limits require evaluation before multiple instances or heavy load. Production readiness and real-user operating metrics are unverified.
+One request covers one cat/dog, one area and one service type. Boarding: 1–30 nights; visits: 1–14 days with one fixed morning/afternoon/evening window per day. Area matching has no GPS distance or AI. Early finish does not recalculate the fixed quote. Capacity uses scheduled intervals and unfinished states; actual check-in/check-out and overdue occupancy are not implemented. No SMS, live chat, online payments/escrow/split settlements, insurance, medical care or identity verification. Order search and paging run in the database (1–50 rows per page). Request/order limits count draft/open requests and unfinished orders; history remains. The member limit still counts all members. Legacy lists, reports and other directories retain a 10,000-row bound; paging is not yet implemented across all modules. In-memory sessions, a platform write lock and these list boundaries require evaluation before multiple instances or heavy load. Production readiness and real-user operating metrics are unverified.
 
 ## License, contributions and feedback
 
