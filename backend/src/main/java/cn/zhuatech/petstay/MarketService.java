@@ -108,7 +108,12 @@ public class MarketService {
   }
 
   void limit(Class<?> type, String code) {
-    Rules.check(db.all(type).size() < admin.setting(code), "RESOURCE_LIMIT");
+    long active =
+        type == CareOrder.class
+            ? db.count("select count(o) from CareOrder o where o.status in ?1", OCCUPY)
+            : db.count(
+                "select count(r) from CareRequest r where r.status in ?1", Set.of("DRAFT", "OPEN"));
+    Rules.check(active < admin.setting(code), "RESOURCE_LIMIT");
   }
 
   Member member() {
@@ -173,9 +178,8 @@ public class MarketService {
   }
 
   List<CareOrder> reservations(Long provider) {
-    return db.query(CareOrder.class, "from CareOrder where providerId=?1", provider).stream()
-        .filter(o -> OCCUPY.contains(o.status))
-        .toList();
+    return db.query(
+        CareOrder.class, "from CareOrder where providerId=?1 and status in ?2", provider, OCCUPY);
   }
 
   boolean published(Provider p) {
@@ -459,7 +463,9 @@ public class MarketService {
                 ps.getFirst(),
                 "availability",
                 db.query(
-                    Availability.class, "from Availability where providerId=?1", ps.getFirst().id));
+                    Availability.class,
+                    "from Availability where providerId=?1 order by id",
+                    ps.getFirst().id));
       }
       case "opportunities" -> {
         var p = ownProvider();
@@ -484,7 +490,7 @@ public class MarketService {
               db
                   .query(DictionaryEntry.class, "from DictionaryEntry where type=?1", "SPECIES")
                   .stream()
-                  .filter(d -> d.enabled)
+                  .filter(d -> d.enabled && Set.of("CAT", "DOG").contains(d.code))
                   .toList(),
               "today",
               today(),
@@ -1232,5 +1238,71 @@ public class MarketService {
                     .toList()))
         .append("\r\n");
     return s.toString();
+  }
+
+  /** 订单按最新身份范围在数据库搜索、计数和分页，不泄露私有快照。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  @Transactional(readOnly = true)
+  public Object orderPage(Map<String, String> filters) {
+    var account = access.current();
+    var role = access.role();
+    boolean operation = role.permissions.contains("moderate") && !role.scope.equals("ASSIGNED");
+    allowed(role.permissions.contains("portal") || operation);
+    int page = Rules.integer(filters.getOrDefault("page", "1"), 1, 200000);
+    int size = Rules.integer(filters.getOrDefault("size", "12"), 1, 50);
+    var args = new ArrayList<Object>();
+    var conditions = new ArrayList<String>();
+    if (!(operation && role.scope.equals("ALL"))) {
+      args.add(account.id);
+      String scope = "(o.ownerId=?1 or o.providerAccountId=?1";
+      if (operation) {
+        args.add(account.departmentId);
+        scope += " or o.departmentId=?2";
+      }
+      conditions.add(scope + ")");
+    }
+    String status = Rules.text(filters.get("status"), 20, false);
+    if (!status.isEmpty()) {
+      Rules.check(
+          Set.of("CONFIRMED", "IN_PROGRESS", "REVIEW", "DISPUTED", "COMPLETED", "CANCELLED")
+              .contains(status),
+          "INVALID_INPUT");
+      args.add(status);
+      conditions.add("o.status=?" + args.size());
+    }
+    String query = Rules.text(filters.get("q"), 80, false);
+    if (!query.isEmpty()) {
+      args.add(
+          "%"
+              + query
+                  .toLowerCase(Locale.ROOT)
+                  .replace("!", "!!")
+                  .replace("%", "!%")
+                  .replace("_", "!_")
+              + "%");
+      conditions.add("lower(o.reference) like ?" + args.size() + " escape '!'");
+    }
+    String where = conditions.isEmpty() ? "" : " where " + String.join(" and ", conditions);
+    Object[] params = args.toArray();
+    long total = db.count("select count(o) from CareOrder o" + where, params);
+    int pages = (int) Math.max(1, (total + size - 1) / size);
+    int actualPage = Math.min(page, pages);
+    var rows =
+        db.page(
+            CareOrder.class,
+            "from CareOrder o" + where + " order by o.id desc",
+            (actualPage - 1) * size,
+            size,
+            params);
+    return map(
+        "items",
+        rows.stream().map(this::orderSummary).toList(),
+        "page",
+        actualPage,
+        "size",
+        size,
+        "total",
+        total,
+        "pages",
+        pages);
   }
 }

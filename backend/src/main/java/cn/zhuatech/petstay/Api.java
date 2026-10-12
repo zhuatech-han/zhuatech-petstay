@@ -205,4 +205,16 @@ public class Api {
       @PathVariable String kind, @PathVariable Long id, @RequestBody Map<String, Object> b) {
     return admin.save(kind, id, b);
   }
+
+  /** 有权订单数据库搜索分页，大小最多50条。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  @GetMapping("/orders/page")
+  public Object orderPage(@RequestParam Map<String, String> filters) {
+    return market.orderPage(filters);
+  }
+
+  /** 有权参与者查看订单照片当日及整单额度。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  @GetMapping("/orders/{id}/photo-allowance")
+  public Object photoAllowance(@PathVariable Long id) {
+    return photos.allowance(id);
+  }
 }

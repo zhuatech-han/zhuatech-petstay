@@ -16,6 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 @Transactional
 public class PhotoService {
+  static final int DAILY_LIMIT = 5;
+  static final long TOTAL_LIMIT = 100L * 1024 * 1024;
   final MarketService market;
   final Store db;
   final AccessService access;
@@ -69,16 +71,16 @@ public class PhotoService {
     }
   }
 
-  /** 指定照护者在进行中订单上传照片；每单最多20张，版本阻止重复提交覆盖。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  /**
+   * 指定照护者在进行中订单上传照片；上海上传日期每单限5张、总量100MiB，版本与同一写锁阻止并发超额。官网 https://www.zhuatech.cn/；微信 zhuatech /
+   * zhuatech2。
+   */
   public Object upload(Long orderId, String version, String caption, MultipartFile file) {
     market.begin("portal");
     var o = market.order(orderId);
     market.allowed(o.providerAccountId.equals(access.current().id));
     market.version(o, Map.of("version", version));
     Rules.check(o.status.equals("IN_PROGRESS"), "STATE_INVALID");
-    Rules.check(
-        db.query(CarePhoto.class, "from CarePhoto where orderId=?1", orderId).size() < 20,
-        "PHOTO_LIMIT");
     if (file.getSize() > 2 * 1024 * 1024) throw new Problem(413, "FILE_TOO_LARGE");
     byte[] data;
     try {
@@ -87,6 +89,11 @@ public class PhotoService {
       throw new Problem(400, "IMAGE_INVALID");
     }
     var clean = sanitize(data);
+    var quota = allowance(orderId);
+    checkQuota(
+        (long) quota.get("dailyCount"),
+        (long) quota.get("totalBytes"),
+        ((byte[]) clean.get("data")).length);
     var p = new CarePhoto();
     p.orderId = orderId;
     p.departmentId = o.departmentId;
@@ -109,5 +116,36 @@ public class PhotoService {
     var p = db.get(CarePhoto.class, id);
     market.allowed(p.orderId.equals(orderId));
     return p;
+  }
+
+  /** 以实际保存字节核验边界，不删除旧照片。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  static void checkQuota(long dailyCount, long totalBytes, int addedBytes) {
+    Rules.check(dailyCount < DAILY_LIMIT, "PHOTO_DAILY_LIMIT");
+    Rules.check(totalBytes + addedBytes <= TOTAL_LIMIT, "PHOTO_STORAGE_LIMIT");
+  }
+
+  /** 有权参与者查看上海上传日期和整单额度，不读取BLOB。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  @Transactional(readOnly = true)
+  public Map<String, Object> allowance(Long orderId) {
+    market.order(orderId);
+    var zone = java.time.ZoneId.of("Asia/Shanghai");
+    var date = java.time.LocalDate.now(clock.withZone(zone));
+    long daily =
+        db.count(
+            "select count(p) from CarePhoto p where p.orderId=?1 and p.createdAt>=?2 and p.createdAt<?3",
+            orderId,
+            date.atStartOfDay(zone).toInstant(),
+            date.plusDays(1).atStartOfDay(zone).toInstant());
+    return Map.of(
+        "date",
+        date.toString(),
+        "dailyCount",
+        daily,
+        "dailyLimit",
+        DAILY_LIMIT,
+        "totalBytes",
+        db.photoBytes(orderId),
+        "totalLimitBytes",
+        TOTAL_LIMIT);
   }
 }
