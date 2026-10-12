@@ -260,12 +260,10 @@ onMounted(async () => {
         ><section class="hero">
           <div>
             <p class="eyebrow">
-              {{
-                t("给每一次托付留下一份记录", "A record of every care journey")
-              }}
+              {{ t("寄养与上门照护", "Boarding & home care") }}
             </p>
             <h1>
-              {{ t("为它安排合适的照护", "Find the right care for your pet") }}
+              {{ t("查找宠物照护服务", "Find pet care services") }}
             </h1>
             <p>
               {{
@@ -445,7 +443,7 @@ onMounted(async () => {
         :aria-label="t('平台说明', 'Platform information')"
       >
         <header>
-          <h2>PetStay 1.0.0</h2>
+          <h2>PetStay 1.1.0</h2>
           <button
             class="icon-button"
             :aria-label="t('关闭', 'Close')"
@@ -481,8 +479,8 @@ onMounted(async () => {
         <p>
           {{
             t(
-              "公众号可打开本手机网页。微信授权登录、微信支付和小程序发布状态见部署说明，不会在未配置时假装已接入。",
-              "This mobile website can be opened from a public-account link. WeChat login, payment and mini-program release status depend on documented configuration and verification.",
+              "手机网页可作为公众号菜单链接。微信登录、微信支付和原生小程序尚未接入。",
+              "This mobile website can be linked from a public-account menu. WeChat login, payments and a native mini-program are not integrated.",
             )
           }}
         </p>

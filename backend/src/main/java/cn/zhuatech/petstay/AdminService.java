@@ -165,13 +165,20 @@ public class AdminService {
         var d = id == null ? new DictionaryEntry() : db.get(DictionaryEntry.class, id);
         String code = Rules.text(b.get("code"), 60, true);
         Rules.check(code.matches("[A-Z0-9_]{2,60}"), "INVALID_INPUT");
-        if (id != null) Rules.check(code.equals(d.code), "IDENTITY_LOCKED");
+        Rules.check(
+            Set.of("CAT", "DOG").contains(code) || (id != null && !Rules.flag(b.get("enabled"))),
+            "SPECIES_UNSUPPORTED");
+        if (id != null) {
+          Rules.check(code.equals(d.code), "IDENTITY_LOCKED");
+          Rules.check(d.version == Rules.id(b.get("version")), "VERSION_CONFLICT");
+        }
         d.type = "SPECIES";
         d.code = code;
         d.name = Rules.text(b.get("name"), 120, true);
         d.nameEn = Rules.text(b.get("nameEn"), 120, true);
         d.enabled = Rules.flag(b.get("enabled"));
         if (id == null) db.save(d);
+        else d.version++;
         out = d;
       }
       case "menus" -> {

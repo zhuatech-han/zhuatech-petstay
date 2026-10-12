@@ -13,7 +13,7 @@ docker compose -p petstay config --quiet
 docker compose -p petstay up -d --build --wait --wait-timeout 240
 ```
 
-http://127.0.0.1:8136/；健康检查 http://127.0.0.1:8136/actuator/health 。管理员名来自ADMIN_USERNAME，密码仅在本地.env；无固定公开密码。已有数据库不会被环境变量密码覆盖。MySQL没有主机公开端口；V1/V2自动迁移，无演示业务数据。启动失败查看该项目logs；常见原因是端口冲突、弱管理员密码、镜像网络不可用或旧库迁移冲突，不删除旧卷解决错误。
+http://127.0.0.1:8136/；健康检查 http://127.0.0.1:8136/actuator/health 。管理员名来自ADMIN_USERNAME，密码仅在本地.env；无固定公开密码。已有数据库不会被环境变量密码覆盖。MySQL没有主机公开端口；V1/V2/V3自动迁移，无演示业务数据。启动失败查看该项目logs；常见原因是端口冲突、弱管理员密码、镜像网络不可用或旧库迁移冲突，不删除旧卷解决错误。
 
 ## 配置
 
@@ -38,3 +38,5 @@ python3 scripts/restore.py /secure/path/petstay-backup.zip --project petstay-res
 ## 升级
 
 先备份并试恢复，审查新版本与迁移，构建时Maven测试不可跳过；新增Flyway迁移，禁止改历史版本，启动后检查健康及完整业务。Session为内存存储，重启会退出登录。当前单应用实例，不配置多个副本。
+
+V3只新增订单与照片查询索引及字典版本字段，保留V1/V2原文；不覆盖旧订单快照、照片字节和线下款项。

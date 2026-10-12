@@ -4,7 +4,7 @@ package cn.zhuatech.petstay;
 import jakarta.persistence.*;
 
 /**
- * 蜂群分类字典，支持禁用历史类别。 Copyright 2026 上海如静知华信息科技有限公司 · https://www.zhuatech.cn/ · 商业咨询微信 zhuatech /
+ * 宠物分类字典，支持禁用历史类别。 Copyright 2026 上海如静知华信息科技有限公司 · https://www.zhuatech.cn/ · 商业咨询微信 zhuatech /
  * zhuatech2
  */
 @Entity
@@ -27,4 +27,7 @@ public class DictionaryEntry {
   public String nameEn;
 
   public boolean enabled = true;
+
+  @Column(nullable = false)
+  public long version = 1;
 }

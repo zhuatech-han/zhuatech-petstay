@@ -4,7 +4,7 @@
 
 **知华科技（上海如静知华信息科技有限公司）** · [官网](https://www.zhuatech.cn/) · **公开源码学习版／非商业源码版**。
 
-PetStay把宠物档案、寄养与上门需求、照护方档期、报价选择、每日照护记录和双方交接放在同一个平台。Java 21 / Spring Boot、Vue 3、MySQL 8及Docker Compose；手机H5与桌面运营后台共用真实数据库。适合学习宠物服务撮合、服务容量管理、订单快照和私有证据管理，也可作为获得商业授权后的定制开发基础。
+当前版本 **1.1.0**。PetStay把宠物档案、寄养与上门需求、照护方档期、报价选择、每日照护记录和双方交接放在同一个平台。Java 21 / Spring Boot、Vue 3、MySQL 8及Docker Compose；手机H5与桌面运营后台共用真实数据库。适合学习宠物服务撮合、服务容量管理、订单快照和私有证据管理，也可作为获得商业授权后的定制开发基础。
 
 ## 从需求到交接
 
@@ -26,9 +26,17 @@ PetStay把宠物档案、寄养与上门需求、照护方档期、报价选择�
 
 会员可以同时做主人和申请照护方。服务资料审核不代表实名、兽医、保险或资质认证。准确地址、私有联系资料和照护说明只向确认订单参与方及授权运营人员开放。
 
+## 1.1 长期记录与操作改进
+
+订单在数据库按本人／运营权限搜索及分页，已完成和已取消订单不占未完成订单额度。照片按上海上传日期每日5张、整单100MiB管理，页面显示剩余额度；单张仍限2MiB。分类当前只支持猫犬，未开放类型不能新增启用。字典编辑检查版本，撤回报价和删除档期使用各自说明。
+
+照护方历史报价可按需求编号和状态筛选，每页12条；报价接口仍有10000条保护，并未改成无限查询。
+
+尚未提供多人门店排班、实际入住接回、主动异常通知、邮件／短信、账号找回和线上支付，现版不能替代多人运营验收。
+
 ## 真实运行页面
 
-以下截图来自独立TEST数据库，名称、地址、联系说明及评价均标为TEST，不代表营业门店或真实客户。图片验收素材使用品牌图并明确标注“不是宠物照片”。
+以下截图来自独立TEST数据库，包含5000条合成历史用于分页检查，名称、地址、联系说明及评价均标为TEST，不代表营业门店或真实客户。图片验收素材使用品牌图并明确标注“不是宠物照片”。
 
 ### 登录入口：会员与照护者共用账号
 
@@ -66,13 +74,17 @@ PetStay把宠物档案、寄养与上门需求、照护方档期、报价选择�
 
 ![手机照护入口](docs/screenshots/10-mobile.jpg)
 
+### 订单检索：在合成历史中按权限分页查询
+
+![订单分页](docs/screenshots/13-order-paging.jpg)
+
 ## 架构与目录
 
 浏览器 → Nginx同源代理 → Spring Boot业务／权限服务 → MySQL；Flyway迁移，JPA验证表结构。照护图片保存在数据库并实际解码、去除EXIF；备份同时保留图片和订单快照。业务写入通过平台团队行锁与version控制，针对单主体、单应用实例及低容量使用。
 
 ```text
 backend/                 Java 21、Spring Boot 4.0.7、业务与身份接口
-  src/main/resources/db/migration/  V1身份、V2宠物撮合与照护
+  src/main/resources/db/migration/  V1身份、V2业务、V3分页与字典版本
   src/test/              业务、权限、照片及真实HTTP集成测试
 frontend/                Vue 3.5.43、Vite 8.1.5、手机与桌面界面
   public/brand/          正式LOGO
@@ -99,7 +111,7 @@ docker compose -p petstay up -d --build --wait --wait-timeout 240
 
 ### 数据库初始化与升级
 
-全新MySQL卷自动创建数据库、执行 `V1__identity.sql` 和 `V2__pet_marketplace.sql`，初始化管理员、角色、权限、菜单、字典及设置。**不自动创建业务假数据**。迁移位于 `backend/src/main/resources/db/migration/`；没有重复执行的业务初始化脚本。升级前备份并试恢复，用新增版本迁移，禁止修改已执行版本；Hibernate仅validate。
+全新MySQL卷自动创建数据库、执行 `V1__identity.sql` 、`V2__pet_marketplace.sql` 和 `V3__order_paging_and_photo_allowance.sql`，初始化管理员、角色、权限、菜单、字典及设置。**不自动创建业务假数据**。迁移位于 `backend/src/main/resources/db/migration/`；没有重复执行的业务初始化脚本。升级前备份并试恢复，用新增版本迁移，禁止修改已执行版本；Hibernate仅validate。
 
 ### 环境变量
 
@@ -126,7 +138,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-quality.txt
 .venv/bin/python -m black --check scripts
 .venv/bin/python -m py_compile scripts/*.py
-python3 scripts/release-check.py
+.venv/bin/python scripts/release-check.py
 git diff --check
 ```
 
@@ -136,7 +148,7 @@ git diff --check
 python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /private/tmp/petstay-quality-state.json
 ```
 
-脚本验证注册越权拒绝、匹配与报价、并发选定、容量、快照、状态、任务修订、私有图片、争议、线下原单退款、评价和权限。状态文件含临时凭据，禁止提交。`capture`／`compare`用于重启及恢复前后全量可见数据和图片哈希核对，详见 [验收记录](docs/verification.md)。后端32项、前端10项和MySQL闭环233项为已执行检查；不替代公网、实机或生产负载验收。
+脚本验证注册越权拒绝、匹配与报价、并发选定、容量、快照、状态、任务修订、私有图片、争议、线下原单退款、评价和权限。状态文件含临时凭据，禁止提交。`capture`／`compare`用于重启及恢复前后全量可见数据和图片哈希核对，详见 [验收记录](docs/verification.md)。后端37项、前端10项和MySQL闭环233项为已执行检查；不替代公网、实机或生产负载验收。
 
 ## 部署、备份与常见问题
 
@@ -146,9 +158,9 @@ python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /priva
 
 ## 安全与已知限制
 
-BCrypt、HttpOnly Session、CSRF、实时账号／角色校验、登录与注册节流、版本锁、私有照片及CSV权限已实现。照片≤2MiB、6000边长、9百万像素，每订单20张。管理员不能冒充订单双方。详见 [安全说明](docs/security.md)及 [业务边界](docs/business.md)。
+BCrypt、HttpOnly Session、CSRF、实时账号／角色校验、登录与注册节流、版本锁、私有照片及CSV权限已实现。照片≤2MiB、6000边长、9百万像素，按上海上传日期每单每日5张、整单100MiB；保留旧照片。管理员不能冒充订单双方。详见 [安全说明](docs/security.md)及 [业务边界](docs/business.md)。
 
-一份需求一只猫／犬、一个地区和一种服务；寄养1–30晚，上门1–14天，每天固定上午／下午／晚间一个窗口。地区匹配不提供GPS距离或AI。提前结束不自动重算固定价；验收前不释放容量。没有短信、实时聊天、线上支付／托管／分账、保险、专业医疗或身份认证。单实例内存Session、写事务平台行锁及列表上限不适合未经评估直接多实例／高并发运行。未验证生产可用性，也无真实用户运营指标。
+一份需求一只猫／犬、一个地区和一种服务；寄养1–30晚，上门1–14天，每天固定上午／下午／晚间一个窗口。地区匹配不提供GPS距离或AI。提前结束不自动重算固定价；容量按预约区间与未完成状态计算，没有实际入住接回和超期在养占位。没有短信、实时聊天、线上支付／托管／分账、保险、专业医疗或身份认证。订单支持数据库搜索分页（每页1–50条）；需求和订单上限只计草稿／待匹配与未完成业务，历史保留，会员人数仍按累计限制。旧列表、后台统计及其他目录仍有10000条保护，尚未完成全模块长期分页。单实例内存Session、写事务平台行锁及这些列表边界不适合未经评估直接多实例／高并发运行。未验证生产可用性，也无真实用户运营指标。
 
 ## 授权、贡献与反馈
 

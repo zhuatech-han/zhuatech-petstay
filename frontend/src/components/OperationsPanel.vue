@@ -3,7 +3,7 @@
 import { ref, computed, onMounted } from "vue";
 import { Search, X } from "@lucide/vue";
 import { api } from "../api.js";
-import { t, stateName, kindName, money } from "../ui.js";
+import { speciesName, t, stateName, kindName, money } from "../ui.js";
 const props = defineProps({
   section: { type: String, required: true },
   pending: Boolean,
@@ -146,9 +146,8 @@ onMounted(load);
             <div>
               <h3>{{ row.displayName }}</h3>
               <p>
-                {{ row.city }} / {{ row.district }} · {{ row.species }} · ≤{{
-                  row.maxWeightKg
-                }}kg
+                {{ row.city }} / {{ row.district }} ·
+                {{ speciesName(row.species) }} · ≤{{ row.maxWeightKg }}kg
               </p>
             </div>
             <span class="badge">{{ stateName(row.status) }}</span>
@@ -157,7 +156,7 @@ onMounted(load);
           <p>
             {{
               t(
-                "寄养容量 / 上门窗口容量：",
+                "寄养容量 / 上门时段名额：",
                 "Boarding / visit-window capacity: ",
               )
             }}{{ row.boardingCapacity }} / {{ row.visitCapacity }}

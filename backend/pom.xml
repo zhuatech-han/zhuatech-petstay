@@ -10,7 +10,7 @@
   </parent>
   <groupId>cn.zhuatech</groupId>
   <artifactId>zhuatech-petstay</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <name>知华科技宠物寄养与上门照护平台公开源码学习版</name>
   <url>https://www.zhuatech.cn/</url>
   <organization>

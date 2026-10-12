@@ -35,4 +35,12 @@ class PhotoSafetyTest {
     assertEquals("image/png", result.get("mime"));
     assertEquals(64, result.get("sha256").toString().length());
   }
+
+  @Test
+  void quotaAcceptsExactLimitAndRejectsOneByteOverOrSixthPhoto() {
+    assertDoesNotThrow(() -> PhotoService.checkQuota(4, PhotoService.TOTAL_LIMIT - 123, 123));
+    assertThrows(
+        Problem.class, () -> PhotoService.checkQuota(4, PhotoService.TOTAL_LIMIT - 122, 123));
+    assertThrows(Problem.class, () -> PhotoService.checkQuota(5, 0, 123));
+  }
 }

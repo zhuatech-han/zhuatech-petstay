@@ -19,6 +19,13 @@ export const windowName = (k) =>
     PM: t("下午 14–17", "Afternoon 14–17"),
     EVENING: t("晚间 18–21", "Evening 18–21"),
   })[k] || k;
+/** 宠物类型按当前语言显示，不向操作页面暴露内部代码。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+export const speciesName = (k) =>
+  ({
+    CAT: t("猫", "Cat"),
+    DOG: t("犬", "Dog"),
+    BOTH: t("猫与犬", "Cats & dogs"),
+  })[k] || t("未支持类型", "Unsupported species");
 export const stateName = (k) =>
   ({
     CONFIRM: t("双方确认", "Booking confirmed"),
@@ -136,6 +143,18 @@ export const errorText = (e) =>
     IMAGE_INVALID: t(
       "请选择有效的PNG或JPEG照片。",
       "Choose a valid PNG or JPEG photo.",
+    ),
+    SPECIES_UNSUPPORTED: t(
+      "当前只支持猫和犬；其他类型尚未开放。",
+      "Only cats and dogs are currently supported.",
+    ),
+    PHOTO_DAILY_LIMIT: t(
+      "本单今天已用完5张照片额度，明天可继续上传。",
+      "This booking has used today's 5-photo allowance. Upload again tomorrow.",
+    ),
+    PHOTO_STORAGE_LIMIT: t(
+      "本单照片已达到100MiB存储额度，请联系负责人核对。",
+      "This booking has reached its 100 MiB photo allowance. Contact the responsible person.",
     ),
     FILE_TOO_LARGE: t("照片不能超过2MiB。", "Photo must be at most 2 MiB."),
     WINDOW_CONFLICT: t(

@@ -19,10 +19,10 @@
 | `/orders/{id}/start`, `/finish`, `/accept`, `/dispute`, `/respond`, `/cancel` | 固定双方角色的状态操作 |
 | `/orders/{id}/tasks/{task}/complete`, `/correct` | 指定照护者完成任务、追加修订 |
 | `/orders/{id}/money`, `/review` | 指定照护者登记真实线下收退；主人评价 |
-| `/orders/{id}/photos` | multipart的file、caption、version；PNG/JPEG限2MiB、每单20张 |
+| `/orders/{id}/photos` | multipart的file、caption、version；PNG/JPEG限2MiB、每日5张（上海上传日期）、整单100MiB |
 | `/orders/{id}/photos/{photo}`, `/export.csv` | 私有照片GET/HEAD、授权CSV导出 |
 | `/moderate`, `/reports`, `/audit` | 运营列表、统计及审计 |
 | `/moderate/{kind}/{id}` | 授权运营审核，含version和审核说明 |
 | `/admin/{kind}` | users、roles、departments、settings、dictionaries的权限维护 |
 
-精确字段与校验参见 `Api.java`、`MarketService.java`、`PhotoService.java`；可执行请求示例在 `scripts/smoke.py`。列表有上限，前端分页只处理当前返回集合，不宣称全量无限查询。无支付、微信登录、地图、短信或第三方诊疗接口。
+精确字段与校验参见 `Api.java`、`MarketService.java`、`PhotoService.java`；可执行请求示例在 `scripts/smoke.py`。订单页面使用`GET /api/orders/page?page=1&size=12&q=&status=`，返回items/page/size/total/pages，按身份在数据库搜索计数，size为1–50；搜索只查订单号，按字面处理%与_。`GET /api/orders/{id}/photo-allowance`返回上海上传日期、dailyCount/dailyLimit和totalBytes/totalLimitBytes，权限与订单一致。旧`/orders`及后台统计仍有10000条界限，其他列表未全部改为数据库分页。无支付、微信登录、地图、短信或第三方诊疗接口。

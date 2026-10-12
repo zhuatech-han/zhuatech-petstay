@@ -1,6 +1,6 @@
 <!-- Copyright 2026 上海如静知华信息科技有限公司 · https://www.zhuatech.cn/ · 微信 zhuatech / zhuatech2 -->
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import {
   Plus,
   Pencil,
@@ -19,6 +19,7 @@ import {
   kindName,
   stateName,
   windowName,
+  speciesName,
   cloneRecord,
 } from "../ui.js";
 const props = defineProps({
@@ -52,6 +53,33 @@ const filtered = computed(() =>
 );
 const visible = computed(() =>
   filtered.value.slice((page.value - 1) * 12, page.value * 12),
+);
+const offerPage = ref(1),
+  offerQuery = ref(""),
+  offerStatus = ref("");
+const filteredOffers = computed(() =>
+  offers.value.filter(
+    (row) =>
+      String(row.requestId).includes(
+        offerQuery.value.trim().replace(/^#/, ""),
+      ) &&
+      (!offerStatus.value || row.status === offerStatus.value),
+  ),
+);
+const visibleOffers = computed(() =>
+  filteredOffers.value.slice((offerPage.value - 1) * 12, offerPage.value * 12),
+);
+watch([offerQuery, offerStatus], () => {
+  offerPage.value = 1;
+});
+watch(
+  () => filteredOffers.value.length,
+  (length) => {
+    offerPage.value = Math.min(
+      offerPage.value,
+      Math.max(1, Math.ceil(length / 12)),
+    );
+  },
 );
 const passwordForm = ref({ oldPassword: "", newPassword: "" });
 async function changePassword() {
@@ -245,7 +273,7 @@ onMounted(load);
         <p class="hint">
           {{
             t(
-              "仅向已确认订单双方开放。修改不会覆盖旧订单冻结的联系资料。",
+              "仅向已确认订单双方开放。修改不会覆盖旧订单确认时的联系资料。",
               "Shared only with confirmed booking participants. Updates do not overwrite old booking details.",
             )
           }}
@@ -374,8 +402,7 @@ onMounted(load);
             <div>
               <h3>{{ row.name }}</h3>
               <p class="muted">
-                {{ row.species === "CAT" ? t("猫", "Cat") : t("犬", "Dog") }} ·
-                {{ row.weightKg }}kg
+                {{ speciesName(row.species) }} · {{ row.weightKg }}kg
               </p>
             </div>
             <span class="badge">{{
@@ -513,7 +540,9 @@ onMounted(load);
             ><p class="pre-wrap">{{ provider.intro }}</p>
             <p>
               {{ provider.city }} · {{ provider.district }} ·
-              {{ provider.species }} · ≤{{ provider.maxWeightKg }}kg
+              {{ speciesName(provider.species) }} · ≤{{
+                provider.maxWeightKg
+              }}kg
             </p>
             <div class="prices">
               <span v-if="provider.boarding"
@@ -548,7 +577,7 @@ onMounted(load);
               <p class="hint">
                 {{
                   t(
-                    "上门照护按固定窗口逐日计次；寄养按日期逐晚占用容量。",
+                    "上门照护按所选时段逐日计次；寄养按日期逐晚占用容量。",
                     "Home visits use one fixed window per day; boarding reserves nightly capacity.",
                   )
                 }}
@@ -568,7 +597,7 @@ onMounted(load);
                 <tr>
                   <th>{{ t("类型", "Type") }}</th>
                   <th>{{ t("起止日期", "Dates") }}</th>
-                  <th>{{ t("窗口", "Window") }}</th>
+                  <th>{{ t("上门时段", "Visit slot") }}</th>
                   <th>{{ t("操作", "Actions") }}</th>
                 </tr>
               </thead>
@@ -628,7 +657,9 @@ onMounted(load);
               </p>
               <h3>{{ row.title }}</h3>
             </div>
-            <span class="badge">{{ row.species }} · {{ row.weightKg }}kg</span>
+            <span class="badge"
+              >{{ speciesName(row.species) }} · {{ row.weightKg }}kg</span
+            >
           </header>
           <p>
             {{ row.startsOn }} → {{ row.endsOn }} ·
@@ -638,7 +669,7 @@ onMounted(load);
           <p class="hint">
             {{
               t(
-                "报价按当前服务单价和日期次数冻结，48小时有效。确认后开放详细交接资料。",
+                "报价按当前服务单价与次数计算并保留，48小时有效。确认后开放详细交接资料。",
                 "Offer uses current service rates and dates, valid for 48 hours. Private handover details follow confirmation.",
               )
             }}
@@ -656,8 +687,36 @@ onMounted(load);
           </button>
         </article></template
       >
-      <template v-else
-        ><div class="table-scroll panel">
+      <template v-else>
+        <div class="list-tools">
+          <input
+            v-model="offerQuery"
+            maxlength="30"
+            :placeholder="t('搜索需求编号', 'Search request number')"
+            :aria-label="t('搜索需求编号', 'Search request number')"
+          />
+          <select
+            v-model="offerStatus"
+            :aria-label="t('报价状态', 'Offer status')"
+          >
+            <option value="">{{ t("全部状态", "All states") }}</option>
+            <option
+              v-for="state in [
+                'PROPOSED',
+                'SELECTED',
+                'NOT_SELECTED',
+                'WITHDRAWN',
+                'EXPIRED',
+              ]"
+              :key="state"
+              :value="state"
+            >
+              {{ stateName(state) }}
+            </option>
+          </select>
+          <span>{{ filteredOffers.length }} {{ t("条报价", "offers") }}</span>
+        </div>
+        <div class="table-scroll panel">
           <table>
             <thead>
               <tr>
@@ -669,7 +728,7 @@ onMounted(load);
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in offers" :key="row.id">
+              <tr v-for="row in visibleOffers" :key="row.id">
                 <td>#{{ row.requestId }}</td>
                 <td>
                   {{ money(row.totalMinor) }} · {{ row.units
@@ -690,13 +749,27 @@ onMounted(load);
                   </button>
                 </td>
               </tr>
-              <tr v-if="!offers.length">
+              <tr v-if="!filteredOffers.length">
                 <td colspan="5">{{ t("暂无报价。", "No offers yet.") }}</td>
               </tr>
             </tbody>
           </table>
-        </div></template
-      >
+        </div>
+        <div v-if="filteredOffers.length > 12" class="pagination">
+          <button :disabled="offerPage === 1" @click="offerPage--">
+            {{ t("上一页", "Previous") }}
+          </button>
+          <span
+            >{{ offerPage }} / {{ Math.ceil(filteredOffers.length / 12) }}</span
+          >
+          <button
+            :disabled="offerPage * 12 >= filteredOffers.length"
+            @click="offerPage++"
+          >
+            {{ t("下一页", "Next") }}
+          </button>
+        </div>
+      </template>
     </template>
     <div v-if="editing" class="modal-backdrop" @click.self="editing = null">
       <section
@@ -786,7 +859,7 @@ onMounted(load);
                     :key="p.id"
                     :value="p.id"
                   >
-                    {{ p.name }} · {{ p.species }}
+                    {{ p.name }} · {{ speciesName(p.species) }}
                   </option>
                 </select></label
               ><label
@@ -862,7 +935,7 @@ onMounted(load);
                   max="20"
                   required /></label
               ><label
-                >{{ t("每窗口上门容量", "Visits per window")
+                >{{ t("每时段上门名额", "Visits per time slot")
                 }}<input
                   v-model="editing.value.visitCapacity"
                   type="number"
@@ -918,7 +991,7 @@ onMounted(load);
                   </option>
                 </select></label
               ><label v-if="editing.value.kind === 'HOME_VISIT'"
-                >{{ t("每日上门窗口", "Daily visit window")
+                >{{ t("每日上门时段", "Daily visit slot")
                 }}<select v-model="editing.value.visitWindow">
                   <option value="AM">{{ windowName("AM") }}</option>
                   <option value="PM">{{ windowName("PM") }}</option>
@@ -978,7 +1051,7 @@ onMounted(load);
               <p class="hint span-two">
                 {{
                   t(
-                    "寄养最多30晚；上门最多14天、所选窗口每天一次。先保存草稿，再发布。",
+                    "寄养最多30晚；上门最多14天、所选时段每天一次。先保存草稿，再发布。",
                     "Up to 30 boarding nights or 14 daily home visits in one selected window. Save a draft, then publish.",
                   )
                 }}
@@ -1150,8 +1223,16 @@ onMounted(load);
           <p v-else>
             {{
               t(
-                "历史记录会保留，使用中的档期或有需求历史的宠物不能删除。",
-                "History is retained. Occupied availability and pets referenced by requests cannot be deleted.",
+                actionForm.type === "withdraw"
+                  ? "撤回后主人不能再选择这份报价，历史记录保留。"
+                  : actionForm.type === "availability"
+                    ? "删除这段可接时间；已有订单占用时不能删除。"
+                    : "删除误建宠物档案；已有需求历史时不能删除。",
+                actionForm.type === "withdraw"
+                  ? "The owner can no longer select this offer. Its history is retained."
+                  : actionForm.type === "availability"
+                    ? "Remove this availability period. Periods used by bookings cannot be deleted."
+                    : "Remove an unused pet profile. Profiles with request history cannot be deleted.",
               )
             }}
           </p>

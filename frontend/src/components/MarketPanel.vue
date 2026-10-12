@@ -122,7 +122,7 @@ onMounted(search);
               type="date"
               :required="!!filters.startsOn" /></label
           ><label v-if="filters.kind === 'HOME_VISIT'"
-            >{{ t("每日上门窗口", "Daily visit window")
+            >{{ t("每日上门时段", "Daily visit slot")
             }}<select v-model="filters.visitWindow">
               <option value="AM">{{ t("上午 09–12", "Morning 09–12") }}</option>
               <option value="PM">
