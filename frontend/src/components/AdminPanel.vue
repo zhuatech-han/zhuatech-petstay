@@ -17,6 +17,7 @@ const q = ref("");
 const page = ref(1);
 const editing = ref(null);
 const ready = ref(false);
+let loadRequest = 0;
 const labels = {
   users: () => t("登录账号", "Accounts"),
   roles: () => t("角色", "Roles"),
@@ -45,11 +46,27 @@ const permissionName = (code) =>
     settings: t("设置", "Settings"),
     audit: t("审计", "Audit"),
   })[code] || code;
-const settingsDescription = () =>
-  t(
-    "保留记录总数上限100–1000；不删除旧记录。",
-    "100–1000 retained records; no history deletion.",
-  );
+const settingName = (code) =>
+  ({
+    max_members: t("会员总数上限", "Member limit"),
+    max_requests: t("活动需求上限", "Active request limit"),
+    max_orders: t("未完成订单上限", "Unfinished booking limit"),
+  })[code] || code;
+const settingsDescription = (code) =>
+  ({
+    max_members: t(
+      "累计会员人数；可设100–1000。",
+      "All members; range 100–1000.",
+    ),
+    max_requests: t(
+      "只计草稿和待匹配需求，历史保留；可设100–1000。",
+      "Draft and open requests only; history retained. Range 100–1000.",
+    ),
+    max_orders: t(
+      "只计未完成订单，完成或取消后释放额度；可设100–1000。",
+      "Unfinished bookings only; completed/cancelled history retained. Range 100–1000.",
+    ),
+  })[code] || "";
 const filtered = computed(() =>
   rows.value.filter((r) =>
     JSON.stringify(r).toLowerCase().includes(q.value.toLowerCase()),
@@ -70,14 +87,24 @@ watch(
 watch(kind, load, { immediate: true });
 /** 独立后台目录读取，不把账号散列或业务私有字段交给浏览器。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
 async function load() {
+  const seq = ++loadRequest;
+  const resource = kind.value;
   ready.value = false;
+  rows.value = [];
   try {
-    rows.value = await api("/admin/" + kind.value);
-    if (kind.value === "users") options.value = await api("/admin/options");
+    const [records, choices] = await Promise.all([
+      api("/admin/" + resource),
+      resource === "users"
+        ? api("/admin/options")
+        : Promise.resolve(options.value),
+    ]);
+    if (seq !== loadRequest) return;
+    rows.value = records;
+    options.value = choices;
   } catch (e) {
-    emit("error", e);
+    if (seq === loadRequest) emit("error", e);
   } finally {
-    ready.value = true;
+    if (seq === loadRequest) ready.value = true;
   }
 }
 /** 准备受控目录表单；密码留空表示保留当前密码。 官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
@@ -123,15 +150,7 @@ const optionName = (rows, id) =>
   <section>
     <header class="page-heading">
       <div>
-        <h1>
-          {{
-            section === "settings"
-              ? t("团队与设置", "Teams & settings")
-              : section === "roles"
-                ? t("角色与权限", "Roles & permissions")
-                : t("登录账号", "Accounts")
-          }}
-        </h1>
+        <h2>{{ labels[kind]() }}</h2>
         <p class="muted">
           {{
             section === "users"
@@ -141,8 +160,8 @@ const optionName = (rows, id) =>
                 )
               : section === "roles"
                 ? t(
-                    "服务端检查业务权限与团队 / 指派范围。",
-                    "The server checks both permissions and team / assignment scope.",
+                    "按岗位设置可用功能与可查看的数据范围。",
+                    "Set the features and data each role can access.",
                   )
                 : t(
                     "修改系统目录与业务参数，保留历史数据。",
@@ -155,9 +174,7 @@ const optionName = (rows, id) =>
         <button :disabled="pending" @click="load">
           {{ t("刷新", "Refresh") }}</button
         ><button
-          v-if="
-            ['users', 'roles', 'departments', 'dictionaries'].includes(kind)
-          "
+          v-if="['users', 'roles', 'departments'].includes(kind)"
           class="primary"
           :disabled="pending || !ready"
           @click="edit(null)"
@@ -253,8 +270,8 @@ const optionName = (rows, id) =>
                 </td>
                 <td>
                   <div class="permission-list">
-                    <span v-for="c in r.permissions" :key="c">{{
-                      permissionName(c)
+                    <span>{{
+                      (r.permissions || []).map(permissionName).join(" / ")
                     }}</span>
                   </div>
                 </td></template
@@ -265,7 +282,7 @@ const optionName = (rows, id) =>
                   {{ r.enabled ? t("启用", "Enabled") : t("停用", "Disabled") }}
                 </td></template
               ><template v-else-if="kind === 'settings'"
-                ><td class="mono">{{ r.code }}</td>
+                ><td>{{ settingName(r.code) }}</td>
                 <td>{{ r.value }}</td>
                 <td>{{ settingsDescription(r.code) }}</td></template
               ><template v-else
@@ -456,7 +473,7 @@ const optionName = (rows, id) =>
                 :disabled="pending"
                 placeholder="Asia/Shanghai / Europe/Berlin / UTC" /></label></template
           ><template v-else-if="kind === 'settings'"
-            ><p class="mono">{{ editing.code }}</p>
+            ><p>{{ settingName(editing.code) }}</p>
             <label
               >{{ t("参数值", "Value")
               }}<input

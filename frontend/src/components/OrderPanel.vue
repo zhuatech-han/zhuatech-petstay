@@ -13,7 +13,15 @@ import {
 } from "@lucide/vue";
 import { toMinor } from "../currency.js";
 import { api, download } from "../api.js";
-import { t, money, stateName, kindName, windowName, taskName } from "../ui.js";
+import {
+  t,
+  money,
+  stateName,
+  kindName,
+  windowName,
+  taskName,
+  speciesName,
+} from "../ui.js";
 const props = defineProps({
   me: { type: Object, required: true },
   initialId: { type: Number, default: null },
@@ -30,18 +38,46 @@ const rows = ref([]),
   form = ref(null),
   file = ref(null),
   photoCaption = ref("");
-const filtered = computed(() =>
-  rows.value.filter(
-    (o) =>
-      (o.reference + " " + o.kind)
-        .toLowerCase()
-        .includes(q.value.toLowerCase()) &&
-      (!status.value || o.status === status.value),
-  ),
-);
-const visible = computed(() =>
-  filtered.value.slice((page.value - 1) * 12, page.value * 12),
-);
+const total = ref(0),
+  pages = ref(1),
+  listError = ref(false),
+  photoQuota = ref(null);
+let listRequest = 0,
+  detailRequest = 0;
+/** 由服务端限定身份、搜索和分页范围；较晚返回的旧请求不能覆盖新页面。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+async function loadRows() {
+  const seq = ++listRequest;
+  ready.value = false;
+  listError.value = false;
+  try {
+    const query = new URLSearchParams({
+      page: String(page.value),
+      size: "12",
+      q: q.value,
+      status: status.value,
+    });
+    const result = await api("/orders/page?" + query);
+    if (seq !== listRequest) return;
+    rows.value = result.items;
+    total.value = result.total;
+    pages.value = result.pages;
+    page.value = result.page;
+  } catch (e) {
+    if (seq !== listRequest) return;
+    listError.value = true;
+    emit("error", e);
+  } finally {
+    if (seq === listRequest) ready.value = true;
+  }
+}
+function search() {
+  page.value = 1;
+  load();
+}
+function turnPage(number) {
+  page.value = number;
+  load();
+}
 const isOwner = computed(
   () =>
     detail.value?.order.ownerId === props.me.id &&
@@ -61,22 +97,35 @@ const today = computed(() =>
   }).format(new Date()),
 );
 async function load() {
-  ready.value = false;
-  try {
-    rows.value = await api("/orders");
-    if (props.initialId) await open(props.initialId);
-  } catch (e) {
-    emit("error", e);
-  } finally {
-    ready.value = true;
-  }
+  await loadRows();
+}
+function backToList() {
+  detailRequest++;
+  detail.value = null;
+  form.value = null;
+  file.value = null;
+  photoCaption.value = "";
+  photoQuota.value = null;
+  location.hash = "orders";
 }
 async function open(id) {
+  const seq = ++detailRequest;
   try {
-    detail.value = await api("/orders/" + id);
+    const [order, quota] = await Promise.all([
+      api("/orders/" + id),
+      api(`/orders/${id}/photo-allowance`),
+    ]);
+    if (seq !== detailRequest) return;
+    if (detail.value?.order.id !== id) {
+      form.value = null;
+      file.value = null;
+      photoCaption.value = "";
+    }
+    detail.value = order;
+    photoQuota.value = quota;
     location.hash = "order/" + id;
   } catch (e) {
-    emit("error", e);
+    if (seq === detailRequest) emit("error", e);
   }
 }
 function act(action, extra = {}) {
@@ -107,7 +156,7 @@ async function submit() {
   if (r) {
     form.value = null;
     await open(o.id);
-    rows.value = await api("/orders");
+    await loadRows();
   }
 }
 async function upload() {
@@ -150,14 +199,17 @@ watch(
     if (id) open(id);
   },
 );
-onMounted(load);
+onMounted(async () => {
+  await load();
+  if (props.initialId) await open(props.initialId);
+});
 </script>
 <template>
   <section>
     <p v-if="!ready" class="loading">{{ t("正在读取…", "Loading…") }}</p>
     <template v-if="detail"
       ><header class="detail-heading">
-        <button class="text-button" @click="detail = null">
+        <button class="text-button" @click="backToList">
           <ArrowLeft :size="17" />{{ t("返回订单", "Back to orders") }}</button
         ><button class="secondary" @click="exportOrder">
           <Download :size="16" />CSV
@@ -323,7 +375,9 @@ onMounted(load);
           <section class="panel">
             <header class="section-heading">
               <h3>{{ t("私有照护照片", "Private care photos") }}</h3>
-              <span class="muted">{{ detail.photos.length }} / 20</span>
+              <span class="muted"
+                >{{ detail.photos.length }} {{ t("张", "photos") }}</span
+              >
             </header>
             <div class="photo-grid">
               <figure v-for="photo in detail.photos" :key="photo.id">
@@ -340,6 +394,13 @@ onMounted(load);
             </div>
             <p v-if="!detail.photos.length" class="muted">
               {{ t("暂无照护照片。", "No care photos yet.") }}
+            </p>
+            <p v-if="photoQuota" class="hint">
+              {{ t("上海上传日期", "Upload date in Shanghai") }}
+              {{ photoQuota.date }} · {{ t("今日", "Today") }}
+              {{ photoQuota.dailyCount }}/{{ photoQuota.dailyLimit }} ·
+              {{ t("整单存储", "Booking storage") }}
+              {{ (photoQuota.totalBytes / 1048576).toFixed(2) }}/100 MiB
             </p>
             <form
               v-if="isProvider && detail.order.status === 'IN_PROGRESS'"
@@ -359,7 +420,14 @@ onMounted(load);
                   accept="image/png,image/jpeg"
                   required
                   @change="file = $event.target.files[0]" /></label
-              ><button class="secondary" :disabled="pending || !file">
+              ><button
+                class="secondary"
+                :disabled="
+                  pending ||
+                  !file ||
+                  (photoQuota && photoQuota.dailyCount >= photoQuota.dailyLimit)
+                "
+              >
                 <Camera :size="16" />{{
                   t("上传照护照片", "Upload care photo")
                 }}
@@ -373,7 +441,8 @@ onMounted(load);
             <dl class="detail-list">
               <dt>{{ t("宠物", "Pet") }}</dt>
               <dd>
-                {{ detail.snapshot.petName }} · {{ detail.snapshot.species }} ·
+                {{ detail.snapshot.petName }} ·
+                {{ speciesName(detail.snapshot.species) }} ·
                 {{ detail.snapshot.weightKg }}kg
               </dd>
               <dt>{{ t("服务地点", "Service address") }}</dt>
@@ -476,11 +545,12 @@ onMounted(load);
           ><Search :size="17" /><input
             v-model="q"
             :placeholder="t('搜索订单号', 'Search reference')"
-            @input="page = 1" /></label
+            maxlength="80"
+            @keyup.enter="search" /></label
         ><select
           v-model="status"
           :aria-label="t('订单状态', 'Order status')"
-          @change="page = 1"
+          @change="search"
         >
           <option value="">{{ t("全部状态", "All states") }}</option>
           <option
@@ -498,8 +568,19 @@ onMounted(load);
             {{ stateName(s) }}
           </option>
         </select>
+        <button class="secondary" @click="search">
+          {{ t("查询", "Search") }}
+        </button>
       </div>
-      <div v-if="!filtered.length" class="empty-state">
+      <div v-if="listError" class="empty-state">
+        <p>
+          {{ t("订单读取失败，请重试。", "Could not load bookings. Retry.") }}
+        </p>
+        <button class="secondary" @click="load">
+          {{ t("重试", "Retry") }}
+        </button>
+      </div>
+      <div v-else-if="!rows.length" class="empty-state">
         <CalendarDays :size="38" />
         <h3>{{ t("暂无照护订单", "No care bookings yet") }}</h3>
         <p>
@@ -512,11 +593,7 @@ onMounted(load);
         </p>
       </div>
       <div class="request-list">
-        <article
-          v-for="row in visible"
-          :key="row.id"
-          class="panel request-card"
-        >
+        <article v-for="row in rows" :key="row.id" class="panel request-card">
           <header>
             <div>
               <p class="eyebrow">{{ kindName(row.kind) }}</p>
@@ -539,11 +616,11 @@ onMounted(load);
           </footer>
         </article>
       </div>
-      <div v-if="filtered.length > 12" class="pagination">
-        <button :disabled="page === 1" @click="page--">
+      <div v-if="total > 12" class="pagination">
+        <button :disabled="page === 1" @click="turnPage(page - 1)">
           {{ t("上一页", "Previous") }}</button
-        ><span>{{ page }} / {{ Math.ceil(filtered.length / 12) }}</span
-        ><button :disabled="page * 12 >= filtered.length" @click="page++">
+        ><span>{{ page }} / {{ pages }}</span
+        ><button :disabled="page >= pages" @click="turnPage(page + 1)">
           {{ t("下一页", "Next") }}
         </button>
       </div></template
