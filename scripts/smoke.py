@@ -506,6 +506,7 @@ def seed(base, state_path, env_file):
     check(status == 403, "Actual server CSRF protects writes")
     check(root.call("/reports")["orders"] == 3, "Real persisted metrics")
     state = {
+        "verificationDate": today,
         "adminUsername": env.get("ADMIN_USERNAME", "admin"),
         "adminPassword": env["ADMIN_PASSWORD"],
         "memberPassword": pw,
@@ -535,6 +536,9 @@ def snapshot(base, state_path):
     state = json.loads(Path(state_path).read_text())
     root = Client(base)
     root.login(state["adminUsername"], state["adminPassword"])
+    if "verificationDate" not in state:
+        state["verificationDate"] = root.call("/options")["today"]
+        private_write(state_path, state)
     data = {}
     for kind in [
         "users",
@@ -554,6 +558,8 @@ def snapshot(base, state_path):
     for row in data["orders"]:
         id = row["id"]
         detail = root.call(f"/orders/{id}")
+        # Runtime date is view metadata, not a persisted business field.
+        detail.pop("today", None)
         data[f"order/{id}"] = detail
         data[f"csv/{id}"] = root.call(f"/orders/{id}/export.csv").decode("utf-8")
         for photo in detail["photos"]:
@@ -565,8 +571,28 @@ def snapshot(base, state_path):
     for name in state["identities"]:
         c = Client(base)
         c.login("test_" + name, state["memberPassword"])
-        for kind in ["profile", "pets", "requests", "provider", "orders"]:
+        for kind in [
+            "profile",
+            "pets",
+            "requests",
+            "provider",
+            "orders",
+            "shops",
+            "notifications",
+            "notification-preferences",
+        ]:
             data[name + "/" + kind] = c.call("/" + kind)
+        for shop in data[name + "/shops"]:
+            if shop["status"] == "ACTIVE":
+                today = state["verificationDate"]
+                to = (
+                    datetime.date.fromisoformat(today) + datetime.timedelta(days=7)
+                ).isoformat()
+                calendar = c.call(f'/shops/{shop["id"]}/calendar?from={today}&to={to}')
+                calendar.pop("today", None)
+                for order in calendar["orders"]:
+                    order.pop("overdue", None)
+                data[name + "/calendar/" + str(shop["id"])] = calendar
     return data
 
 

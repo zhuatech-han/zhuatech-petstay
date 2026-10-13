@@ -3,6 +3,7 @@
 """只恢复到全新独立内置数据库项目，不覆盖旧资源。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。"""
 import argparse, hashlib, json, re, subprocess, time, zipfile
 from backup import ROOT, invoke, validate_env
+from compose_support import prefix as compose_prefix, require_empty_restore_storage
 
 
 def main():
@@ -10,13 +11,18 @@ def main():
     p.add_argument("backup")
     p.add_argument("--project", required=True)
     p.add_argument("--env-file", required=True)
+    p.add_argument(
+        "--compose-file",
+        action="append",
+        help="Explicit Compose files, in order; repeat for overrides",
+    )
     a = p.parse_args()
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,50}", a.project):
         p.error("Invalid Compose project")
     env = validate_env(a.env_file)
     if env.get("BIND_ADDRESS", "127.0.0.1") not in ["127.0.0.1", "::1"]:
         raise SystemExit("Restore binds only to localhost until separately validated")
-    prefix = ["docker", "compose", "--env-file", a.env_file, "-p", a.project]
+    prefix = compose_prefix(ROOT, a.project, a.env_file, a.compose_file)
     if invoke(prefix + ["ps", "-aq"], stdout=subprocess.PIPE).stdout.strip():
         raise SystemExit("Refuse to overwrite existing Compose project")
     for kind, name in [
@@ -32,6 +38,7 @@ def main():
             == 0
         ):
             raise SystemExit("Refuse to overwrite existing resources")
+    require_empty_restore_storage(prefix, ROOT, a.project)
     with zipfile.ZipFile(a.backup) as archive:
         if len(archive.namelist()) != 2 or set(archive.namelist()) != {
             "manifest.json",
