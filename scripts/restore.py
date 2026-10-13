@@ -53,25 +53,42 @@ def main():
     invoke(prefix + ["build"], stdout=subprocess.DEVNULL)
     invoke(prefix + ["up", "-d", "mysql"], stdout=subprocess.DEVNULL)
     ready = False
-    for _ in range(60):
-        test = subprocess.run(
-            prefix
-            + [
-                "exec",
-                "-T",
-                "mysql",
-                "sh",
-                "-c",
-                'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" -N -e "SELECT 1" "$MYSQL_DATABASE"',
-            ],
-            cwd=ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    deadline = time.monotonic() + 900
+    while time.monotonic() < deadline:
+        try:
+            health = subprocess.run(
+                prefix + ["ps", "--format", "{{.Health}}", "mysql"],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=min(15, max(0.1, deadline - time.monotonic())),
+            )
+            if health.returncode != 0 or health.stdout.strip() != "healthy":
+                time.sleep(max(0, min(5, deadline - time.monotonic())))
+                continue
+            test = subprocess.run(
+                prefix
+                + [
+                    "exec",
+                    "-T",
+                    "mysql",
+                    "sh",
+                    "-c",
+                    'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" -N -e "SELECT 1" "$MYSQL_DATABASE"',
+                ],
+                cwd=ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=min(15, max(0.1, deadline - time.monotonic())),
+            )
+        except subprocess.TimeoutExpired:
+            time.sleep(max(0, min(5, deadline - time.monotonic())))
+            continue
         if test.returncode == 0:
             ready = True
             break
-        time.sleep(2)
+        time.sleep(max(0, min(5, deadline - time.monotonic())))
     if not ready:
         raise SystemExit("Database not ready; retain isolated resources for diagnosis")
     invoke(
