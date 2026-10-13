@@ -64,9 +64,12 @@ class MarketIntegrationTest {
     r.add("spring.datasource.password", () -> "");
     r.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
     r.add("petstay.admin-password", () -> PW);
+    r.add("petstay.notifications.scheduler-enabled", () -> "false");
   }
 
   @Autowired MockMvc mvc;
+  @Autowired NotificationService notifications;
+  @org.springframework.test.context.bean.override.mockito.MockitoSpyBean EmailDelivery testMail;
   @Autowired MutableClock time;
   @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
   final JsonMapper json = JsonMapper.builder().build();
@@ -200,6 +203,7 @@ class MarketIntegrationTest {
   @BeforeEach
   void setup() throws Exception {
     time.now = Instant.parse("2026-10-12T04:00:00Z");
+    org.mockito.Mockito.doReturn(false).when(testMail).available();
     suffix = UUID.randomUUID().toString().substring(0, 8);
     city = "TEST_CITY_" + suffix;
     root = login("admin");
@@ -452,6 +456,18 @@ class MarketIntegrationTest {
         m("version", version(provider, "orders", id), "note", "TEST future"),
         409);
     tasks(id);
+    post(
+        provider,
+        "/orders/" + id + "/check-out",
+        m(
+            "version",
+            version(provider, "orders", id),
+            "note",
+            "TEST physical collection",
+            "recipient",
+            "TEST主人",
+            "belongings",
+            "TEST物品返还"));
     action(provider, id, "finish");
     var d = get(owner, "/orders/" + id);
     assertEquals(27000, d.path("order").path("totalMinor").asLong());
@@ -1184,5 +1200,612 @@ class MarketIntegrationTest {
         "2026-10-13", get(owner, "/orders/" + id + "/photo-allowance").path("date").asText());
     assertEquals(0, get(owner, "/orders/" + id + "/photo-allowance").path("dailyCount").asInt());
     assertEquals(200, uploadTestPhoto(id).getResponse().getStatus());
+  }
+
+  long account(MockHttpSession session) throws Exception {
+    return get(session, "/auth/me").path("id").asLong();
+  }
+
+  JsonNode staff(MockHttpSession employee, String role) throws Exception {
+    String username = get(employee, "/auth/me").path("username").asText();
+    return post(
+        provider, "/shops/" + providerId + "/invite", m("username", username, "role", role));
+  }
+
+  void enableStaff() throws Exception {
+    post(provider, "/shops/" + providerId + "/policy", m("workforceEnabled", true));
+  }
+
+  void rosterStaff(MockHttpSession employee) throws Exception {
+    post(
+        provider,
+        "/shops/" + providerId + "/rosters",
+        m(
+            "accountId",
+            account(employee),
+            "startsOn",
+            "2026-10-12",
+            "endsOn",
+            "2026-11-10",
+            "visitWindow",
+            "DAY"));
+  }
+
+  void assignStaff(long id, MockHttpSession employee, String date) throws Exception {
+    post(
+        provider,
+        "/orders/" + id + "/assign",
+        m(
+            "version",
+            version(provider, "orders", id),
+            "accountId",
+            account(employee),
+            "taskDate",
+            date,
+            "note",
+            "TEST shift assignment"));
+  }
+
+  @Test
+  void invitationConsentScopeAndSafeRevocation() throws Exception {
+    long id = booked();
+    var invitation = staff(other, "CARER");
+    denied(other, "/shops/" + providerId + "/calendar", "GET", Map.of(), 403);
+    denied(other, "/orders/" + id, "GET", Map.of(), 403);
+    denied(
+        owner,
+        "/staff/" + invitation.path("id").asLong() + "/accept",
+        "POST",
+        m("version", 1),
+        403);
+    post(other, "/staff/" + invitation.path("id").asLong() + "/accept", m("version", 1));
+    assertEquals(
+        0,
+        get(other, "/shops/" + providerId + "/calendar?from=2026-10-12&to=2026-10-13")
+            .path("orders")
+            .size());
+    denied(other, "/orders/" + id, "GET", Map.of(), 403);
+    denied(
+        other,
+        "/shops/" + providerId + "/invite",
+        "POST",
+        m("username", get(owner, "/auth/me").path("username").asText(), "role", "CARER"),
+        403);
+    post(provider, "/staff/" + invitation.path("id").asLong() + "/revoke", m("version", 2));
+    denied(other, "/shops/" + providerId + "/calendar", "GET", Map.of(), 403);
+  }
+
+  @Test
+  void staffAssignmentsEnforceCoverageResponsibilityAndMoneySeparation() throws Exception {
+    enableStaff();
+    var invitation = staff(other, "CARER");
+    post(other, "/staff/" + invitation.path("id").asLong() + "/accept", m("version", 1));
+    long id = booked();
+    denied(
+        provider,
+        "/orders/" + id + "/start",
+        "POST",
+        m("version", version(provider, "orders", id), "note", "TEST missing staff"),
+        409);
+    denied(
+        provider,
+        "/orders/" + id + "/assign",
+        "POST",
+        m(
+            "version",
+            version(provider, "orders", id),
+            "accountId",
+            account(other),
+            "taskDate",
+            "2026-10-12",
+            "note",
+            "TEST missing roster"),
+        409);
+    rosterStaff(other);
+    assignStaff(id, other, "2026-10-12");
+    assertEquals(1, get(other, "/orders/page").path("total").asInt());
+    denied(
+        provider,
+        "/staff/" + invitation.path("id").asLong() + "/revoke",
+        "POST",
+        m("version", 2),
+        409);
+    var cal = get(provider, "/shops/" + providerId + "/calendar?from=2026-10-12&to=2026-10-13");
+    denied(
+        provider,
+        "/rosters/" + cal.path("rosters").get(0).path("id").asLong(),
+        "DELETE",
+        m("version", 1),
+        409);
+    action(provider, id, "start");
+    var task = get(other, "/orders/" + id).path("tasks").get(0).path("id").asLong();
+    denied(
+        provider,
+        "/orders/" + id + "/tasks/" + task + "/complete",
+        "POST",
+        m("version", version(provider, "orders", id), "note", "TEST wrong assignee"),
+        403);
+    denied(
+        other,
+        "/orders/" + id + "/money",
+        "POST",
+        m(
+            "version",
+            version(other, "orders", id),
+            "kind",
+            "RECEIPT",
+            "amountMinor",
+            4500,
+            "reference",
+            "TEST_NO_FINANCE",
+            "note",
+            "TEST denied"),
+        403);
+    post(
+        other,
+        "/orders/" + id + "/tasks/" + task + "/complete",
+        m("version", version(other, "orders", id), "note", "TEST actual employee care"));
+    denied(
+        provider,
+        "/orders/" + id + "/assign",
+        "POST",
+        m(
+            "version",
+            version(provider, "orders", id),
+            "accountId",
+            account(provider),
+            "taskDate",
+            "2026-10-12",
+            "note",
+            "TEST done history"),
+        409);
+    pay(id, "TEST_STAFF_PAYMENT", 4500);
+    action(provider, id, "finish");
+    action(owner, id, "accept");
+    post(provider, "/staff/" + invitation.path("id").asLong() + "/revoke", m("version", 2));
+    denied(other, "/orders/" + id, "GET", Map.of(), 403);
+    assertEquals(0, get(other, "/orders/page").path("total").asInt());
+  }
+
+  @Test
+  void managerCoordinatesWithoutImpersonatingOwnerOrFinance() throws Exception {
+    var invitation = staff(other, "MANAGER");
+    post(other, "/staff/" + invitation.path("id").asLong() + "/accept", m("version", 1));
+    long id = booked();
+    assertTrue(get(other, "/orders/" + id).path("canCoordinate").asBoolean());
+    action(other, id, "start");
+    tasks(id);
+    action(other, id, "finish");
+    denied(
+        other,
+        "/orders/" + id + "/accept",
+        "POST",
+        m("version", version(other, "orders", id), "note", "TEST owner impersonation"),
+        403);
+    denied(
+        other,
+        "/orders/" + id + "/money",
+        "POST",
+        m(
+            "version",
+            version(other, "orders", id),
+            "kind",
+            "RECEIPT",
+            "amountMinor",
+            4500,
+            "reference",
+            "TEST_MANAGER_FINANCE",
+            "note",
+            "TEST denied"),
+        403);
+    denied(root, "/shops/" + providerId + "/policy", "POST", m("workforceEnabled", true), 403);
+  }
+
+  @Test
+  void staffModeFrozenAndOwnerCalendarConflictsAreChecked() throws Exception {
+    long old = booked();
+    enableStaff();
+    assertFalse(get(provider, "/orders/" + old).path("order").path("managedCare").asBoolean());
+    action(provider, old, "start");
+    // Another shop asks this provider owner to care in the same window: legacy bookings count too.
+    var invitation = staff(other, "CARER");
+    post(other, "/staff/" + invitation.path("id").asLong() + "/accept", m("version", 1));
+    rosterStaff(other);
+    var secondPet =
+        post(
+                owner,
+                "/pets",
+                m(
+                    "name",
+                    "TEST second",
+                    "species",
+                    "CAT",
+                    "weightKg",
+                    "3",
+                    "careNotes",
+                    "TEST",
+                    "enabled",
+                    true))
+            .path("id")
+            .asLong();
+    long r = request(owner, secondPet, "HOME_VISIT", "PM", "2026-10-12", "2026-10-13"),
+        id = select(owner, r, quote(r));
+    post(
+        provider,
+        "/shops/" + providerId + "/rosters",
+        m(
+            "accountId",
+            account(provider),
+            "startsOn",
+            "2026-10-12",
+            "endsOn",
+            "2026-10-13",
+            "visitWindow",
+            "DAY"));
+    assignStaff(id, provider, "2026-10-12"); // PM differs from original AM, so it is valid.
+    assertTrue(get(provider, "/orders/" + id).path("order").path("managedCare").asBoolean());
+    var pol = get(provider, "/shops/" + providerId + "/calendar").path("policy");
+    post(
+        provider,
+        "/shops/" + providerId + "/policy",
+        m("version", pol.path("version").asLong(), "workforceEnabled", false));
+    assertTrue(get(provider, "/orders/" + id).path("order").path("managedCare").asBoolean());
+  }
+
+  @Test
+  void physicalBoardingCollectionControlsCapacityAndKeepsHandover() throws Exception {
+    long r = request(owner, pet, "BOARDING", "NIGHT", "2026-10-12", "2026-10-13"),
+        id = select(owner, r, quote(r));
+    action(provider, id, "start");
+    assertEquals("ARRIVED", get(owner, "/orders/" + id).path("order").path("stayStatus").asText());
+    denied(
+        provider,
+        "/orders/" + id + "/finish",
+        "POST",
+        m("version", version(provider, "orders", id), "note", "TEST before collection"),
+        409);
+    tasks(id);
+    time.now = Instant.parse("2026-10-13T04:00:00Z");
+    notifications.generateReminders();
+    notifications.generateReminders();
+    assertEquals(6, get(provider, "/orders/" + id).path("tasks").size());
+    assertTrue(
+        get(provider, "/shops/" + providerId + "/calendar")
+            .path("orders")
+            .get(0)
+            .path("overdue")
+            .asBoolean());
+    var catalog =
+        get(null, "/public/providers?kind=BOARDING&startsOn=2026-10-13&endsOn=2026-10-14");
+    assertFalse(
+        java.util.stream.StreamSupport.stream(catalog.spliterator(), false)
+            .anyMatch(p -> p.path("id").asLong() == providerId));
+    for (var t : get(provider, "/orders/" + id).path("tasks"))
+      if (t.path("status").asText().equals("PENDING"))
+        post(
+            provider,
+            "/orders/" + id + "/tasks/" + t.path("id").asLong() + "/complete",
+            m("version", version(provider, "orders", id), "note", "TEST overdue care"));
+    denied(
+        provider,
+        "/orders/" + id + "/check-out",
+        "POST",
+        m("version", version(provider, "orders", id), "note", "TEST no recipient"),
+        400);
+    post(
+        provider,
+        "/orders/" + id + "/check-out",
+        m(
+            "version",
+            version(provider, "orders", id),
+            "note",
+            "TEST healthy collection",
+            "recipient",
+            "TEST authorized owner",
+            "belongings",
+            "TEST returned carrier"));
+    assertEquals(2, get(owner, "/orders/" + id).path("handovers").size());
+    assertEquals("DEPARTED", get(owner, "/orders/" + id).path("order").path("stayStatus").asText());
+    action(provider, id, "finish");
+    assertTrue(
+        java.util.stream.StreamSupport.stream(
+                get(null, "/public/providers?kind=BOARDING&startsOn=2026-10-13&endsOn=2026-10-14")
+                    .spliterator(),
+                false)
+            .anyMatch(p -> p.path("id").asLong() == providerId));
+  }
+
+  @Test
+  void notificationOwnershipDailyDedupeAndChannelFailureAreVisible() throws Exception {
+    long id = booked();
+    notifications.generateReminders();
+    notifications.generateReminders();
+    var inbox = get(owner, "/notifications");
+    var records = inbox.path("items");
+    assertTrue(records.size() >= 2);
+    long due =
+        java.util.stream.StreamSupport.stream(records.spliterator(), false)
+            .filter(n -> n.path("orderId").asLong() == id && n.path("event").asText().equals("DUE"))
+            .count();
+    assertEquals(1, due);
+    var n = records.get(0);
+    denied(
+        other,
+        "/notifications/" + n.path("id").asLong() + "/read",
+        "POST",
+        m("version", n.path("version").asLong()),
+        403);
+    post(
+        owner,
+        "/notifications/" + n.path("id").asLong() + "/read",
+        m("version", n.path("version").asLong()));
+    denied(owner, "/notification-email/request", "POST", m("email", "test@example.invalid"), 409);
+    denied(
+        owner,
+        "/notification-preferences",
+        "POST",
+        m("emailEnabled", true, "remindersEnabled", true, "reminderHour", 9, "language", "zh"),
+        409);
+    assertFalse(get(owner, "/notification-preferences").toString().contains("codeHash"));
+    post(
+        owner,
+        "/notification-preferences",
+        m("emailEnabled", false, "remindersEnabled", false, "reminderHour", 9, "language", "en"));
+    time.now = Instant.parse("2026-10-13T04:00:00Z");
+    notifications.generateReminders();
+    assertFalse(get(owner, "/notifications").toString().contains(":DUE:2026-10-13"));
+  }
+
+  @Test
+  void emailVerificationAttemptsAndQueueRetryRespectOptIn() throws Exception {
+    org.mockito.Mockito.doReturn(true).when(testMail).available();
+    var bodies = new ArrayList<String>();
+    org.mockito.Mockito.doAnswer(
+            call -> {
+              bodies.add(call.getArgument(2));
+              return null;
+            })
+        .when(testMail)
+        .send(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString());
+    post(owner, "/notification-email/request", m("email", "test-owner@example.invalid"));
+    String code = bodies.getFirst().split("code: ")[1].substring(0, 6);
+    String wrong = code.equals("000000") ? "111111" : "000000";
+    denied(owner, "/notification-email/verify", "POST", m("code", wrong), 409);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select code_attempts from notification_preference where account_id=?",
+            Integer.class,
+            account(owner)));
+    post(owner, "/notification-email/verify", m("code", code));
+    var p = get(owner, "/notification-preferences");
+    assertFalse(p.path("emailEnabled").asBoolean());
+    post(
+        owner,
+        "/notification-preferences",
+        m(
+            "version",
+            p.path("version").asLong(),
+            "emailEnabled",
+            true,
+            "remindersEnabled",
+            true,
+            "reminderHour",
+            9,
+            "language",
+            "en"));
+    long id = booked();
+    var job = notifications.claim();
+    assertNotNull(job);
+    assertFalse(job.skipped());
+    assertEquals("test-owner@example.invalid", job.destination());
+    notifications.finish(job.id(), false);
+    assertEquals(
+        "RETRY",
+        jdbc.queryForObject(
+            "select delivery_status from care_notification where id=?", String.class, job.id()));
+    time.now = time.now.plusSeconds(121);
+    var retry = notifications.claim();
+    assertEquals(job.id(), retry.id());
+    notifications.finish(retry.id(), true);
+    assertEquals(
+        "SENT",
+        jdbc.queryForObject(
+            "select delivery_status from care_notification where id=?", String.class, job.id()));
+    notifications.generateReminders();
+    p = get(owner, "/notification-preferences");
+    post(
+        owner,
+        "/notification-preferences",
+        m(
+            "version",
+            p.path("version").asLong(),
+            "emailEnabled",
+            true,
+            "remindersEnabled",
+            false,
+            "reminderHour",
+            9,
+            "language",
+            "en"));
+    assertTrue(notifications.claim().skipped());
+    action(provider, id, "start");
+    p = get(owner, "/notification-preferences");
+    post(
+        owner,
+        "/notification-preferences",
+        m(
+            "version",
+            p.path("version").asLong(),
+            "emailEnabled",
+            false,
+            "remindersEnabled",
+            true,
+            "reminderHour",
+            9,
+            "language",
+            "en"));
+    assertTrue(notifications.claim().skipped());
+  }
+
+  @Test
+  void crossShopDoubleBookingCountsLegacyOwnerWork() throws Exception {
+    long first = booked();
+    var p = post(other, "/provider", providerBody());
+    long secondShop = p.path("id").asLong();
+    post(
+        root,
+        "/moderate/providers/" + secondShop,
+        m("version", 1, "status", "APPROVED", "note", "TEST reviewed"));
+    availability(other, "HOME_VISIT", "AM", "2026-10-12", "2026-10-13");
+    post(other, "/shops/" + secondShop + "/policy", m("workforceEnabled", true));
+    var inv =
+        post(
+            other,
+            "/shops/" + secondShop + "/invite",
+            m("username", get(provider, "/auth/me").path("username").asText(), "role", "CARER"));
+    post(provider, "/staff/" + inv.path("id").asLong() + "/accept", m("version", 1));
+    post(
+        other,
+        "/shops/" + secondShop + "/rosters",
+        m(
+            "accountId",
+            account(provider),
+            "startsOn",
+            "2026-10-12",
+            "endsOn",
+            "2026-10-13",
+            "visitWindow",
+            "AM"));
+    long pet2 =
+        post(
+                owner,
+                "/pets",
+                m(
+                    "name",
+                    "TEST second",
+                    "species",
+                    "CAT",
+                    "weightKg",
+                    "3",
+                    "careNotes",
+                    "TEST",
+                    "enabled",
+                    true))
+            .path("id")
+            .asLong();
+    long r = request(owner, pet2, "HOME_VISIT", "AM", "2026-10-12", "2026-10-13");
+    var quote =
+        post(
+            other,
+            "/requests/" + r + "/propose",
+            m("version", version(owner, "requests", r), "note", "TEST second shop"));
+    long id = select(owner, r, quote);
+    denied(
+        other,
+        "/orders/" + id + "/assign",
+        "POST",
+        m(
+            "version",
+            version(other, "orders", id),
+            "accountId",
+            account(provider),
+            "taskDate",
+            "2026-10-12",
+            "note",
+            "TEST duplicate shift"),
+        409);
+    assertEquals(0, get(other, "/orders/" + id).path("assignments").size());
+    denied(provider, "/orders/" + id, "GET", Map.of(), 403);
+    assertEquals(1, get(provider, "/orders/page").path("total").asInt());
+    assertEquals(first, get(provider, "/orders/page").path("items").get(0).path("id").asLong());
+  }
+
+  @Test
+  void concurrentAssignmentHasOneWinnerAndNoLostHistory() throws Exception {
+    enableStaff();
+    var inv = staff(other, "CARER");
+    post(other, "/staff/" + inv.path("id").asLong() + "/accept", m("version", 1));
+    rosterStaff(other);
+    rosterStaff(provider);
+    long id = booked();
+    long v = version(provider, "orders", id);
+    var gate = new CountDownLatch(1);
+    var pool = Executors.newFixedThreadPool(2);
+    try {
+      var a =
+          pool.submit(
+              () -> {
+                gate.await();
+                return result(
+                        provider,
+                        "/orders/" + id + "/assign",
+                        "POST",
+                        m(
+                            "version",
+                            v,
+                            "accountId",
+                            account(other),
+                            "taskDate",
+                            "2026-10-12",
+                            "note",
+                            "TEST race A"))
+                    .getResponse()
+                    .getStatus();
+              });
+      var b =
+          pool.submit(
+              () -> {
+                gate.await();
+                return result(
+                        provider,
+                        "/orders/" + id + "/assign",
+                        "POST",
+                        m(
+                            "version",
+                            v,
+                            "accountId",
+                            account(provider),
+                            "taskDate",
+                            "2026-10-12",
+                            "note",
+                            "TEST race B"))
+                    .getResponse()
+                    .getStatus();
+              });
+      gate.countDown();
+      var statuses =
+          new ArrayList<>(List.of(a.get(30, TimeUnit.SECONDS), b.get(30, TimeUnit.SECONDS)));
+      Collections.sort(statuses);
+      assertEquals(List.of(200, 409), statuses);
+      var d = get(provider, "/orders/" + id);
+      assertEquals(1, d.path("assignments").size());
+      assertEquals(v + 1, d.path("order").path("version").asLong());
+      assertEquals(
+          1,
+          java.util.stream.StreamSupport.stream(d.path("entries").spliterator(), false)
+              .filter(e -> e.path("action").asText().equals("ASSIGN"))
+              .count());
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void platformTimezoneMatchesCareCalendarAndReminderPreferences() throws Exception {
+    try {
+      jdbc.update("update department set zone=? where id=1", "Asia/Tokyo");
+      time.now = Instant.parse("2026-10-12T15:30:00Z");
+      assertEquals("2026-10-13", get(provider, "/options").path("today").asText());
+      assertEquals(
+          get(provider, "/options").path("today").asText(),
+          get(provider, "/shops/" + providerId + "/calendar").path("today").asText());
+      assertEquals("Asia/Tokyo", get(provider, "/notification-preferences").path("zone").asText());
+    } finally {
+      jdbc.update("update department set zone=? where id=1", "Asia/Shanghai");
+    }
   }
 }
