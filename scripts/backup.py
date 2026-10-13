@@ -5,6 +5,8 @@ import argparse, hashlib, json, os, re, subprocess, tempfile, zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from compose_support import prefix as compose_prefix
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -32,6 +34,11 @@ def main():
     p.add_argument("--project", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--env-file", default=str(ROOT / ".env"))
+    p.add_argument(
+        "--compose-file",
+        action="append",
+        help="Explicit Compose files, in order; repeat for overrides",
+    )
     a = p.parse_args()
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,50}", a.project):
         p.error("Invalid Compose project")
@@ -40,7 +47,7 @@ def main():
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise SystemExit("Refuse to overwrite existing backup")
-    prefix = ["docker", "compose", "--env-file", a.env_file, "-p", a.project]
+    prefix = compose_prefix(ROOT, a.project, a.env_file, a.compose_file)
     if not invoke(
         prefix + ["ps", "-q", "backend"], stdout=subprocess.PIPE
     ).stdout.strip():

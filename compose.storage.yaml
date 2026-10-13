@@ -1,0 +1,9 @@
+# Copyright 2026 上海如静知华信息科技有限公司 · https://www.zhuatech.cn/ · 微信 zhuatech / zhuatech2
+# Optional dedicated host storage. Create an empty private directory before first startup.
+# Use together with compose.yaml; never point a restore at an existing data directory.
+services:
+  mysql:
+    volumes:
+      - type: bind
+        source: ${PETSTAY_MYSQL_DATA_DIR:?set an absolute dedicated data directory}
+        target: /var/lib/mysql

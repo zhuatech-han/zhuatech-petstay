@@ -14,6 +14,7 @@ export const kindName = (k) =>
   k === "BOARDING" ? t("宠物寄养", "Boarding") : t("上门照护", "Home visit");
 export const windowName = (k) =>
   ({
+    DAY: t("整日", "Full day"),
     NIGHT: t("过夜寄养", "Overnight"),
     AM: t("上午 09–12", "Morning 09–12"),
     PM: t("下午 14–17", "Afternoon 14–17"),
@@ -28,6 +29,23 @@ export const speciesName = (k) =>
   })[k] || t("未支持类型", "Unsupported species");
 export const stateName = (k) =>
   ({
+    ACTIVE: t("已加入", "Active"),
+    INVITED: t("待接受", "Invited"),
+    REVOKED: t("已撤销", "Revoked"),
+    LEGACY: t("旧版交接流程", "Legacy handover"),
+    EXPECTED: t("待入住", "Awaiting arrival"),
+    ARRIVED: t("在养", "Boarded"),
+    DEPARTED: t("已接回", "Collected"),
+    NOT_APPLICABLE: t("无需入住", "No boarding"),
+    CHECK_OUT: t("实际接回", "Physical collection"),
+    "CHECK-OUT": t("实际接回", "Physical collection"),
+    ASSIGN: t("照护分派", "Care assignment"),
+    IN_APP: t("仅站内", "In-app only"),
+    QUEUED: t("待发送", "Queued"),
+    SENDING: t("发送中", "Sending"),
+    SENT: t("SMTP已接受", "Accepted by SMTP"),
+    RETRY: t("等待重试", "Awaiting retry"),
+    FAILED: t("发送失败", "Delivery failed"),
     CONFIRM: t("双方确认", "Booking confirmed"),
     START: t("开始照护", "Care started"),
     FINISH: t("照护提交", "Care submitted"),
@@ -64,6 +82,83 @@ export const taskName = (k) =>
   })[k] || k;
 export const errorText = (e) =>
   ({
+    STAFF_CONFLICT: t(
+      "员工在此日期或窗口已有照护，无法重复分派。",
+      "Staff already have care in this date or window.",
+    ),
+    ROSTER_REQUIRED: t(
+      "请先为员工发布本店对应日期与窗口的班次。",
+      "Publish a matching roster in this shop first.",
+    ),
+    ROSTER_CONFLICT: t(
+      "班次与已有日期窗口重叠。",
+      "Roster overlaps an existing window.",
+    ),
+    STAFF_INACTIVE: t(
+      "员工、账号或所属门店权限已失效。",
+      "Employee, account or shop access is inactive.",
+    ),
+    ASSIGNMENT_REQUIRED: t(
+      "请先在“门店与排期”安排全部照护任务日。",
+      "Assign every care day in Shops & schedule first.",
+    ),
+    ASSIGNMENT_LOCKED: t(
+      "当天已有完成任务，不能改写责任人。",
+      "Completed tasks prevent reassignment.",
+    ),
+    ASSIGNMENTS_PENDING: t(
+      "请先移交未完成任务，再撤销关系或删除班次。",
+      "Transfer pending assignments before removing access or rosters.",
+    ),
+    CHECK_OUT_REQUIRED: t(
+      "请先登记宠物实际接回。",
+      "Record physical collection first.",
+    ),
+    OVERDUE_TASKS_PENDING: t(
+      "超期任务正在补充，请刷新完成今日照护后再登记接回。",
+      "Refresh and complete today's overdue care before collection.",
+    ),
+    INVITATION_EXISTS: t(
+      "员工已有有效邀请或门店关系。",
+      "An invitation or membership already exists.",
+    ),
+    MEMBER_UNAVAILABLE: t(
+      "未找到可用会员，请核对已注册账号名。",
+      "No active member found. Check the registered username.",
+    ),
+    OWNER_FIXED: t(
+      "门店负责人不能通过员工邀请修改。",
+      "The shop owner cannot be changed by invitation.",
+    ),
+    MAIL_UNAVAILABLE: t(
+      "邮件服务尚未配置，站内消息可用。",
+      "Email is not configured. In-app messages are available.",
+    ),
+    MAIL_FAILED: t(
+      "验证邮件发送失败，请检查邮件服务。",
+      "Verification email failed. Check SMTP.",
+    ),
+    EMAIL_NOT_VERIFIED: t(
+      "需先配置邮件服务并验证本人邮箱。",
+      "Configure SMTP and verify your email first.",
+    ),
+    EMAIL_INVALID: t("请输入有效邮箱地址。", "Enter a valid email address."),
+    EMAIL_RATE_LIMIT: t(
+      "验证邮件发送过于频繁，请稍后再试。",
+      "Verification emails are rate limited. Try later.",
+    ),
+    EMAIL_CODE_INVALID: t(
+      "验证码不正确，请核对邮件。",
+      "Incorrect code. Check your email.",
+    ),
+    EMAIL_CODE_EXPIRED: t(
+      "验证码过期或错误次数过多，请重新验证。",
+      "Code expired or attempts exhausted. Request verification again.",
+    ),
+    NOTIFICATION_RETRY_DENIED: t(
+      "无法重试，请核对渠道、权限或发送次数。",
+      "Retry denied. Check channel, access and attempt limits.",
+    ),
     CONTACT_REQUIRED: t(
       "请先在“我的资料”完善联系人、联系方式和所在地区。",
       "Complete your contact and location in My profile first.",

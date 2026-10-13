@@ -10,3 +10,8 @@ Spring Boot / Spring Security / Spring Data / Flyway: retain distributed Apache-
 MySQL Connector/J: retain distributed GPL-2.0 and Universal FOSS Exception notices.
 H2 test dependency: retain distributed MPL-2.0/EPL-1.0 notices.
 Docker images (Maven, Eclipse Temurin, Node, Nginx, MySQL) carry additional third-party notices. This file is an attribution index, not a replacement license. Review dependency and image distributions before redistribution.
+
+PetStay 1.2 SMTP additions:
+Jakarta Mail API / Eclipse Angus Mail: retain the licenses and notices shipped in META-INF/LICENSE.* and source distributions, including EPL-2.0 and applicable GPL-2.0 with Classpath Exception provisions.
+Jakarta Activation / Eclipse Angus Activation: retain distributed EDL-1.0 and applicable API notices.
+Primary project references: https://github.com/jakartaee/mail-api and https://github.com/eclipse-ee4j/angus-mail . This addition does not change the license of PetStay's own code.

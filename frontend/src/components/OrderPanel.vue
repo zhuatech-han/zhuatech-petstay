@@ -88,13 +88,17 @@ const isProvider = computed(
     detail.value?.order.providerAccountId === props.me.id &&
     props.me.permissions.includes("portal"),
 );
-const today = computed(() =>
-  new Intl.DateTimeFormat("en-CA", {
-    timeZone: props.me.zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date()),
+const isCoordinator = computed(() => detail.value?.canCoordinate);
+const canTask = (task) => detail.value?.taskActionIds.includes(task.id);
+const today = computed(
+  () =>
+    detail.value?.today ||
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: props.me.zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date()),
 );
 async function load() {
   await loadRows();
@@ -151,6 +155,10 @@ async function submit() {
   } else if (f.action === "review") {
     body.rating = f.rating;
     body.comment = f.comment;
+  }
+  if (f.action === "check-out" || f.action === "start") {
+    body.belongings = f.belongings || "";
+    body.recipient = f.recipient || "";
   }
   const r = await props.perform(path, "POST", body);
   if (r) {
@@ -240,14 +248,20 @@ onMounted(async () => {
       </div>
       <div class="action-bar">
         <button
-          v-if="isProvider && detail.order.status === 'CONFIRMED'"
+          v-if="isCoordinator && detail.order.status === 'CONFIRMED'"
           class="primary"
           :disabled="pending"
           @click="act('start')"
         >
           {{ t("确认交接并开始照护", "Start care after handover") }}</button
         ><button
-          v-if="isProvider && detail.order.status === 'IN_PROGRESS'"
+          v-if="
+            isCoordinator &&
+            detail.order.status === 'IN_PROGRESS' &&
+            ['LEGACY', 'NOT_APPLICABLE', 'DEPARTED'].includes(
+              detail.order.stayStatus,
+            )
+          "
           class="primary"
           :disabled="pending"
           @click="act('finish')"
@@ -255,6 +269,17 @@ onMounted(async () => {
           {{
             t("完成照护并提交主人确认", "Submit care for confirmation")
           }}</button
+        ><button
+          v-if="
+            isCoordinator &&
+            detail.order.status === 'IN_PROGRESS' &&
+            detail.order.stayStatus === 'ARRIVED'
+          "
+          class="primary"
+          :disabled="pending"
+          @click="act('check-out', { recipient: '', belongings: '' })"
+        >
+          {{ t("登记实际接回", "Record physical collection") }}</button
         ><button
           v-if="isOwner && detail.order.status === 'REVIEW'"
           class="primary"
@@ -272,7 +297,7 @@ onMounted(async () => {
         >
           {{ t("提出争议", "Raise an issue") }}</button
         ><button
-          v-if="isProvider && detail.order.status === 'DISPUTED'"
+          v-if="isCoordinator && detail.order.status === 'DISPUTED'"
           class="primary"
           :disabled="pending"
           @click="act('respond')"
@@ -313,12 +338,20 @@ onMounted(async () => {
                 <div>
                   <strong>{{ taskName(task.kind) }}</strong>
                   <p class="muted">
-                    {{ task.taskDate }} · {{ stateName(task.status) }}
+                    {{ task.taskDate }} · {{ stateName(task.status)
+                    }}<template v-if="detail.order.managedCare">
+                      · {{ t("责任人", "Assigned account") }} #{{
+                        detail.assignments.find(
+                          (a) => a.taskDate === task.taskDate,
+                        )?.accountId || "—"
+                      }}</template
+                    >
                   </p>
                 </div>
                 <button
                   v-if="
-                    isProvider &&
+                    canTask(task) &&
+                    detail.order.departedAt === null &&
                     detail.order.status === 'IN_PROGRESS' &&
                     task.status === 'PENDING' &&
                     task.taskDate <= today
@@ -330,7 +363,8 @@ onMounted(async () => {
                   {{ t("记录完成", "Record completion") }}</button
                 ><button
                   v-if="
-                    isProvider &&
+                    canTask(task) &&
+                    detail.order.departedAt === null &&
                     detail.order.status === 'IN_PROGRESS' &&
                     task.status === 'DONE'
                   "
@@ -342,6 +376,67 @@ onMounted(async () => {
                 </button>
               </article>
             </div>
+          </section>
+          <section v-if="detail.order.kind === 'BOARDING'" class="panel">
+            <h3>{{ t("入住与接回", "Arrival & collection") }}</h3>
+            <p>
+              <span class="badge">{{
+                stateName(detail.order.stayStatus)
+              }}</span>
+              ·
+              {{
+                detail.order.managedCare
+                  ? t("员工排班订单", "Staff-managed booking")
+                  : t("负责人照护", "Provider-owner care")
+              }}
+            </p>
+            <p v-if="detail.order.arrivedAt" class="muted">
+              {{ t("实际入住", "Arrived") }}
+              {{ new Date(detail.order.arrivedAt).toLocaleString() }}
+            </p>
+            <p v-if="detail.order.departedAt" class="muted">
+              {{ t("实际接回", "Collected") }}
+              {{ new Date(detail.order.departedAt).toLocaleString() }}
+            </p>
+            <p
+              v-if="
+                detail.order.arrivedAt &&
+                !detail.order.departedAt &&
+                today >= detail.order.endsOn
+              "
+              class="message error"
+            >
+              {{
+                t(
+                  "超期未接回，继续占用门店容量。",
+                  "Collection is overdue; shop capacity remains occupied.",
+                )
+              }}
+            </p>
+            <article
+              v-for="h in detail.handovers"
+              :key="h.id"
+              class="money-record"
+            >
+              <strong>{{
+                h.kind === "CHECK_IN"
+                  ? t("入住交接", "Arrival handover")
+                  : t("接回交接", "Collection handover")
+              }}</strong>
+              <p class="pre-wrap">{{ h.conditionNote }}</p>
+              <p v-if="h.recipient">
+                {{ t("接回人", "Recipient") }}: {{ h.recipient }}
+              </p>
+              <p class="pre-wrap">
+                {{ t("物品交接", "Belongings") }}: {{ h.belongings || "—" }}
+              </p>
+              <small
+                >{{ new Date(h.createdAt).toLocaleString() }} ·
+                {{ t("办理账号", "Recorded by account") }} #{{
+                  h.actorId
+                }}</small
+              >
+            </article>
           </section>
           <section class="panel">
             <h3>{{ t("照护与交接记录", "Care and handover history") }}</h3>
@@ -403,7 +498,11 @@ onMounted(async () => {
               {{ (photoQuota.totalBytes / 1048576).toFixed(2) }}/100 MiB
             </p>
             <form
-              v-if="isProvider && detail.order.status === 'IN_PROGRESS'"
+              v-if="
+                detail.canUpload &&
+                detail.order.departedAt === null &&
+                detail.order.status === 'IN_PROGRESS'
+              "
               class="photo-upload"
               @submit.prevent="upload"
             >
@@ -658,6 +757,26 @@ onMounted(async () => {
           {{ detail.order.reference }} · {{ stateName(detail.order.status) }}
         </p>
         <form @submit.prevent="submit">
+          <template
+            v-if="
+              form.action === 'check-out' ||
+              (form.action === 'start' &&
+                detail.order.stayStatus === 'EXPECTED')
+            "
+            ><label v-if="form.action === 'check-out'"
+              >{{ t("实际接回人", "Actual recipient")
+              }}<input
+                v-model="form.recipient"
+                maxlength="120"
+                required /></label
+            ><label
+              >{{ t("随行物品与交还说明", "Belongings & return note")
+              }}<textarea
+                v-model="form.belongings"
+                maxlength="1800"
+                rows="3"
+              /></label
+          ></template>
           <template v-if="form.action === 'money'"
             ><label
               >{{ t("类型", "Type")

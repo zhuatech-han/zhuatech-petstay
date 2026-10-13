@@ -4,7 +4,7 @@
 
 **ZhiHua Technology (Shanghai Rujing Zhihua Information Technology Co., Ltd.)** · [Official website](https://www.zhuatech.cn/) · **Public source learning edition / non-commercial source edition**.
 
-Current version: **1.1.0**. PetStay brings pet profiles, boarding and home visit requests, provider availability, quote selection, daily care records and two-party handover into one platform. Built with Java 21 / Spring Boot, Vue 3, MySQL 8 and Docker Compose, its mobile H5 and desktop operations interface use a real shared database. It supports learning about pet service marketplaces, service capacity, frozen order snapshots and private evidence, and can serve as a customization foundation after obtaining commercial authorization.
+Current version: **1.2.0**. PetStay brings pet profiles, boarding and home visit requests, provider availability, quote selection, daily care records and two-party handover into one platform. Built with Java 21 / Spring Boot, Vue 3, MySQL 8 and Docker Compose, its mobile H5 and desktop operations interface use a real shared database. It supports learning about pet service marketplaces, service capacity, frozen order snapshots and private evidence, and can serve as a customization foundation after obtaining commercial authorization.
 
 ## Request to handover
 
@@ -21,6 +21,8 @@ Current version: **1.1.0**. PetStay brings pet profiles, boarding and home visit
 | Public mobile web | Actual approved service directory; area/date/type filters; details; approved reviews; Chinese/English switch |
 | Pet owner | Registration/login, private profile, pets, request drafts/publication, matching candidates, quote selection, private orders, acceptance/disputes, reviews, CSV |
 | Care provider | Service review, availability/capacity, eligible opportunities, quotes/withdrawal, daily tasks, appended corrections, private images, offline receipts/refunds |
+| Shops and staff | Accepted invitations, owner/manager/carer access, rosters, daily assignments, cross-shop conflicts, arrival/collection and overdue occupancy |
+| Notifications | Persistent inbox and unread count, daily due/overdue reminders, preferences, email verification, SMTP queue status and bounded retries |
 | Operations | Provider/review moderation, scoped orders, reports and audit |
 | Administration | Accounts, roles, teams, menu permissions, settings and dictionaries; live identity checks, protected public-member role and last administrator |
 
@@ -32,11 +34,19 @@ Order search and paging use database authorization scopes. Completed and cancell
 
 Provider quote history can be filtered by request number and status, with 12 rows per page. Its legacy API retains a 10,000-row bound; it is not an unlimited query.
 
-Multi-user shop scheduling, actual check-in/check-out, automatic incident notifications, email/SMS, account recovery and online payment are not implemented. This version has not passed multi-user operational acceptance.
+## 1.2 Shop operations and reminders
+
+Each provider profile represents a shop or care team. Employees use independent accounts and accept invitations before gaining access. Managers coordinate their shop; carers see assigned orders. The original provider records money and the pet owner confirms service independently. Staff mode is frozen when each new order is created; disabling it cannot bypass existing assignments.
+
+Assign one person per task day; the three boarding tasks share that person. Publish a working roster before assigning orders. Cross-shop checks allow one home visit per window or up to five boarding pets per day, with no mixed home visits. Completed tasks prevent reassignment; pending responsibilities must be transferred before revocation or roster removal. Supplemental historical rosters and pending assignments retain the current operation timestamp and do not fabricate earlier completion times.
+
+New boarding orders record physical arrival, belongings, collection recipient and condition. Capacity remains occupied until collection; overdue care tasks continue daily without automatic price changes. Existing 1.1 orders retain their legacy flow, snapshots, photos and amounts.
+
+Business status messages remain in the inbox; daily reminders have an enable switch and a platform-timezone reminder hour (Shanghai by default). Once the operator configures SMTP, members verify their own email and explicitly opt in. Delivery failures remain visible and are retried within limits. Emails contain only a reference and event; SMTP acceptance does not guarantee inbox delivery. Without SMTP configuration, no email is sent. SMS, WeChat messages, account recovery and online payment are not implemented. See [shop operations](docs/shop-operations.md).
 
 ## Actual running pages
 
-Screenshots use an isolated TEST database containing 5,000 synthetic historical records for paging checks. Names, addresses, contact notes and reviews are marked TEST; they are not real businesses or customers. The image validation fixture is a brand image explicitly labeled as not a pet photo.
+Screenshots show isolated 1.2 TEST instances with pets, requests, independent staff, daily assignments, arrival/collection and notifications. Names, addresses, contact notes and reviews are marked TEST; they are not real businesses or customers. The image validation fixture is a brand image explicitly labeled as not a pet photo.
 
 ### Account entry — members and providers share an account
 
@@ -74,9 +84,23 @@ Screenshots use an isolated TEST database containing 5,000 synthetic historical 
 
 ![Mobile H5](docs/screenshots/10-mobile.jpg)
 
-### Order search — authorized paging over synthetic history
+### Order search — authorized database paging
 
 ![Order paging](docs/screenshots/13-order-paging.jpg)
+
+### Shop operations — rosters, daily assignments and employee access
+
+![Shop schedule and staff](docs/screenshots/14-shop-schedule.jpg)
+
+![Mobile shop schedule](docs/screenshots/15-mobile-shop.jpg)
+
+### Notifications — preferences, email verification and a real inbox
+
+![Reminders and inbox](docs/screenshots/16-notifications.jpg)
+
+### Carer workspace — assigned tasks and authorized private images
+
+![Staff care workspace](docs/screenshots/17-staff-care.jpg)
 
 ## Architecture and directories
 
@@ -84,7 +108,7 @@ Browser → same-origin Nginx proxy → Spring Boot business/authorization servi
 
 ```text
 backend/                  Java 21 / Spring Boot 4.0.7, business and identity APIs
-  src/main/resources/db/migration/  V1 identity, V2 care, V3 paging and dictionary versions
+  src/main/resources/db/migration/  V1 identity, V2 care, V3 paging, V4 shops and notifications
   src/test/               Rules, permissions, image safety and real HTTP integration
 frontend/                 Vue 3.5.43 / Vite 8.1.5, mobile and desktop UI
   public/brand/           Official logo
@@ -113,7 +137,7 @@ Initializing a new database on slower storage can take several minutes. Startup 
 
 ### Database initialization and upgrades
 
-A new MySQL volume creates the database, executes `V1__identity.sql` , `V2__pet_marketplace.sql` and `V3__order_paging_and_photo_allowance.sql`, then initializes administrator, roles, permissions, menus, dictionaries and settings. **No fabricated business seed data.** Migrations live at `backend/src/main/resources/db/migration/`; no separate repeatedly executed business initialization script. Back up and test restore before upgrades; add migrations instead of modifying applied versions. Hibernate only validates.
+A new MySQL volume creates the database, executes `V1__identity.sql` , `V2__pet_marketplace.sql` , `V3__order_paging_and_photo_allowance.sql` and `V4__shop_operations_and_notifications.sql`, then initializes administrator, roles, permissions, menus, dictionaries and settings. **No fabricated business seed data.** Migrations live at `backend/src/main/resources/db/migration/`; no separate repeatedly executed business initialization script. Back up and test restore before upgrades; add migrations instead of modifying applied versions. Hibernate only validates.
 
 ### Configuration
 
@@ -123,6 +147,8 @@ A new MySQL volume creates the database, executes `V1__identity.sql` , `V2__pet_
 | ADMIN_USERNAME / ADMIN_PASSWORD | Initial administrator; password 12–72 UTF-8 bytes with upper/lowercase and digits |
 | WEB_PORT / BIND_ADDRESS | Defaults 8136 / 127.0.0.1; avoid other project ports |
 | COOKIE_SECURE | false locally; must be true for public HTTPS |
+| MAIL_ENABLED / MAIL_HOST / MAIL_PORT | Email is disabled by default; configure an SMTP server and port before enabling |
+| MAIL_USERNAME / MAIL_PASSWORD / MAIL_FROM / MAIL_TLS | Environment-injected account, password and sender; REQUIRED or SSL encryption; NONE only for isolated local tests |
 | DATABASE_URL / DATABASE_USER | Optional external MySQL; certificate validation and trusted CA required, see deployment notes |
 
 ## Tests and validation
@@ -140,6 +166,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-quality.txt
 .venv/bin/python -m black --check scripts
 .venv/bin/python -m py_compile scripts/*.py
+.venv/bin/python -m unittest discover -s scripts -p "test_*.py"
 .venv/bin/python scripts/release-check.py
 git diff --check
 ```
@@ -150,7 +177,7 @@ Only against an isolated empty TEST instance, with a restricted state file:
 python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /private/tmp/petstay-quality-state.json
 ```
 
-The script verifies registration privilege rejection, matching and quotes, concurrent selection, capacity, snapshots, states, task corrections, private images, disputes, original receipt refunds, reviews and authorization. The state file contains temporary credentials and must never be published. `capture`/`compare` check all visible business data and image hashes across restart and restore; see [validation record](docs/verification.md). Executed checks include 37 backend tests, 10 frontend tests and 233 MySQL workflow assertions. These do not certify public deployment, physical devices or production load.
+The script verifies registration privilege rejection, matching and quotes, concurrent selection, capacity, snapshots, states, task corrections, private images, disputes, original receipt refunds, reviews and authorization. The state file contains temporary credentials and must never be published. `capture`/`compare` check all visible business data and image hashes across restart and restore; see [validation record](docs/verification.md). Executed 1.2 checks include 49 backend tests, 10 frontend tests, 233 MySQL workflow checks and 230 shop-flow requests/assertions. Actual SMTP rejection/retry and preservation of original V3 data during V4 migration were also checked. See the validation record for restart and restore results. These do not certify public deployment, physical devices or production load.
 
 ## Deployment, backup and troubleshooting
 
@@ -160,11 +187,13 @@ Responsive mobile layout is implemented. A prepared public account, HTTPS domain
 
 During restore, readiness checks wait up to 15 minutes, polling container health before verifying the application database account. Each probe has a 15-second limit. SQL clients are not repeatedly started during initialization. A timeout retains the isolated restore resources for diagnosis and does not overwrite the source instance.
 
+Optional [dedicated host storage](compose.storage.yaml) uses an existing private data directory selected by `PETSTAY_MYSQL_DATA_DIR`. Pass both Compose files, including repeated `--compose-file` arguments to backup/restore tools. Restore refuses nonempty directories, symlinks and shared volumes. See deployment notes.
+
 ## Security and known limitations
 
 BCrypt, HttpOnly sessions, CSRF, live identity/role checks, registration/login throttling, versions and private image/CSV authorization are implemented. Images: ≤2MiB, 6000px edge, 9 million pixels and 5 per order per Shanghai upload date, with 100 MiB per order; existing photos remain. Administrators cannot impersonate either party. See [security](docs/security.md) and [business rules](docs/business.md).
 
-One request covers one cat/dog, one area and one service type. Boarding: 1–30 nights; visits: 1–14 days with one fixed morning/afternoon/evening window per day. Area matching has no GPS distance or AI. Early finish does not recalculate the fixed quote. Capacity uses scheduled intervals and unfinished states; actual check-in/check-out and overdue occupancy are not implemented. No SMS, live chat, online payments/escrow/split settlements, insurance, medical care or identity verification. Order search and paging run in the database (1–50 rows per page). Request/order limits count draft/open requests and unfinished orders; history remains. The member limit still counts all members. Legacy lists, reports and other directories retain a 10,000-row bound; paging is not yet implemented across all modules. In-memory sessions, a platform write lock and these list boundaries require evaluation before multiple instances or heavy load. Production readiness and real-user operating metrics are unverified.
+One request covers one cat/dog, one area and one service type. Boarding: 1–30 nights; visits: 1–14 days with one fixed morning/afternoon/evening window per day. Area matching has no GPS distance or AI. Early finish does not recalculate the fixed quote. Legacy orders retain scheduled capacity rules. New boarding occupancy lasts until physical collection, conservatively blocking future capacity while pets remain boarded. No SMS, live chat, online payments/escrow/split settlements, insurance, medical care or identity verification. Order search and paging run in the database (1–50 rows per page). Request/order limits count draft/open requests and unfinished orders; history remains. The member limit still counts all members. Legacy lists, reports and other directories retain a 10,000-row bound; paging is not yet implemented across all modules. Inbox paging is database-backed, but staff relationships are limited to 100 and rosters to 500 per shop. Interrupted delivery leases may repeat email; inbox delivery is not guaranteed. In-memory sessions, a platform write lock and these list boundaries require evaluation before multiple instances or heavy load. Production readiness and real-user operating metrics are unverified.
 
 ## License, contributions and feedback
 

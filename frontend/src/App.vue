@@ -1,6 +1,6 @@
 <!-- Copyright 2026 上海如静知华信息科技有限公司 · https://www.zhuatech.cn/ · 微信 zhuatech / zhuatech2 -->
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import {
   PawPrint,
   Menu,
@@ -17,6 +17,8 @@ import WorkspacePanel from "./components/WorkspacePanel.vue";
 import OrderPanel from "./components/OrderPanel.vue";
 import OperationsPanel from "./components/OperationsPanel.vue";
 import AdminPanel from "./components/AdminPanel.vue";
+import ShopPanel from "./components/ShopPanel.vue";
+import NotificationsPanel from "./components/NotificationsPanel.vue";
 const me = ref(null),
   view = ref("market"),
   pending = ref(false),
@@ -27,8 +29,36 @@ const me = ref(null),
   about = ref(false),
   mobileMenu = ref(false),
   orderId = ref(null);
+const unread = ref(0);
+let unreadTimer;
+async function refreshUnread() {
+  const id = me.value?.id;
+  if (!id || !me.value.permissions.includes("portal")) {
+    unread.value = 0;
+    return;
+  }
+  try {
+    const r = await api("/notifications/unread");
+    if (me.value?.id === id) unread.value = r.unread;
+  } catch (e) {
+    if (e.status === 401 && me.value?.id === id) onError(e);
+  }
+}
+watch(me, refreshUnread);
+onUnmounted(() => {
+  clearInterval(unreadTimer);
+  window.removeEventListener("hashchange", restoreRoute);
+});
 const credentials = ref({ username: "", password: "", displayName: "" });
-const mainViews = new Set(["market", "pets", "requests", "orders", "provider"]);
+const mainViews = new Set([
+  "market",
+  "pets",
+  "requests",
+  "orders",
+  "provider",
+  "shop",
+  "notifications",
+]);
 const nav = computed(
   () => me.value?.menus?.filter((m) => mainViews.has(m.code)) || [],
 );
@@ -146,14 +176,26 @@ async function logout() {
     notice.value = t("已退出。", "Signed out.");
   }
 }
+/** 地址栏与浏览器前进后退同步实际页面，订单读取仍由服务端校验。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+function restoreRoute() {
+  if (!me.value) return;
+  const hash = location.hash.slice(1);
+  if (hash.startsWith("order/") && /^\d+$/.test(hash.slice(6)))
+    openOrder(Number(hash.slice(6)));
+  else {
+    orderId.value = null;
+    view.value =
+      me.value.menus.some((m) => m.code === hash) || hash === "profile"
+        ? hash
+        : "market";
+  }
+}
 onMounted(async () => {
+  window.addEventListener("hashchange", restoreRoute);
+  unreadTimer = setInterval(refreshUnread, 30000);
   try {
     me.value = await api("/auth/me");
-    const hash = location.hash.slice(1);
-    if (hash.startsWith("order/") && /^\d+$/.test(hash.slice(6)))
-      openOrder(Number(hash.slice(6)));
-    else if (me.value.menus.some((m) => m.code === hash) || hash === "profile")
-      view.value = hash;
+    restoreRoute();
   } catch (e) {
     if (e.status !== 401) onError(e);
   }
@@ -180,7 +222,12 @@ onMounted(async () => {
             :class="{ active: view === m.code }"
             @click="go(m.code)"
           >
-            {{ language === "en" ? m.nameEn : m.name }}
+            {{ language === "en" ? m.nameEn : m.name
+            }}<span
+              v-if="m.code === 'notifications' && unread"
+              class="unread-count"
+              >{{ unread > 99 ? "99+" : unread }}</span
+            >
           </button></template
         ><button v-else @click="authOpen = true">
           {{ t("成为照护者", "Provide care") }}
@@ -229,7 +276,12 @@ onMounted(async () => {
         :key="m.code"
         @click="go(m.code)"
       >
-        {{ language === "en" ? m.nameEn : m.name }}</button
+        {{ language === "en" ? m.nameEn : m.name
+        }}<span
+          v-if="m.code === 'notifications' && unread"
+          class="unread-count"
+          >{{ unread > 99 ? "99+" : unread }}</span
+        ></button
       ><button v-if="me" @click="canPortal ? go('profile') : (about = true)">
         {{ t("我的资料", "My profile") }}
       </button>
@@ -299,8 +351,23 @@ onMounted(async () => {
           <p class="eyebrow">PetStay / {{ t("工作空间", "Workspace") }}</p>
           <h1>{{ viewTitle }}</h1>
         </header>
+        <ShopPanel
+          v-if="view === 'shop'"
+          :key="me.id"
+          :me="me"
+          :pending="pending"
+          :perform="perform"
+          @error="onError"
+          @open-order="openOrder" />
+        <NotificationsPanel
+          v-else-if="view === 'notifications'"
+          :key="me.id"
+          :pending="pending"
+          :perform="perform"
+          @error="onError"
+          @open-order="openOrder" />
         <AdminPanel
-          v-if="['users', 'roles', 'settings'].includes(view)"
+          v-else-if="['users', 'roles', 'settings'].includes(view)"
           :section="view"
           :pending="pending"
           :perform="perform"
@@ -443,7 +510,7 @@ onMounted(async () => {
         :aria-label="t('平台说明', 'Platform information')"
       >
         <header>
-          <h2>PetStay 1.1.0</h2>
+          <h2>PetStay 1.2.0</h2>
           <button
             class="icon-button"
             :aria-label="t('关闭', 'Close')"
