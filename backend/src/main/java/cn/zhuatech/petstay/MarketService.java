@@ -18,15 +18,25 @@ public class MarketService {
   final Store db;
   final AccessService access;
   final AdminService admin;
+  final WorkforceService workforce;
+  final org.springframework.context.ApplicationEventPublisher events;
   final Clock clock;
   final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
   /** 连接实时身份、锁、数据库和可测试时钟。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
-  public MarketService(Store db, AccessService access, AdminService admin, Clock clock) {
+  public MarketService(
+      Store db,
+      AccessService access,
+      AdminService admin,
+      Clock clock,
+      WorkforceService workforce,
+      org.springframework.context.ApplicationEventPublisher events) {
     this.db = db;
     this.access = access;
     this.admin = admin;
     this.clock = clock;
+    this.workforce = workforce;
+    this.events = events;
   }
 
   void begin(String permission) {
@@ -168,7 +178,10 @@ public class MarketService {
 
   boolean visible(CareOrder o) {
     var id = access.current().id;
-    return id.equals(o.ownerId) || id.equals(o.providerAccountId) || operation(o.departmentId);
+    return id.equals(o.ownerId)
+        || id.equals(o.providerAccountId)
+        || operation(o.departmentId)
+        || (access.has("portal") && workforce.visible(o, id));
   }
 
   CareOrder order(Long id) {
@@ -219,7 +232,9 @@ public class MarketService {
                       o.kind.equals(kind)
                           && o.visitWindow.equals(win)
                           && !day.isBefore(o.startsOn)
-                          && day.isBefore(o.endsOn))
+                          && (day.isBefore(o.endsOn)
+                              || (o.arrivedAt != null && o.departedAt == null))
+                          && !(o.kind.equals("BOARDING") && o.departedAt != null))
               .count()
           >= cap) return false;
     }
@@ -231,7 +246,11 @@ public class MarketService {
         .noneMatch(
             o ->
                 OCCUPY.contains(o.status)
-                    && overlap(o.startsOn, o.endsOn, r.startsOn, r.endsOn)
+                    && !(o.kind.equals("BOARDING") && o.departedAt != null)
+                    && (overlap(o.startsOn, o.endsOn, r.startsOn, r.endsOn)
+                        || (o.arrivedAt != null
+                            && o.departedAt == null
+                            && r.endsOn.isAfter(o.startsOn)))
                     && (o.kind.equals("BOARDING")
                         || r.kind.equals("BOARDING")
                         || o.visitWindow.equals(r.visitWindow)));
@@ -356,7 +375,17 @@ public class MarketService {
         "totalMinor",
         o.totalMinor,
         "createdAt",
-        o.createdAt);
+        o.createdAt,
+        "providerId",
+        o.providerId,
+        "managedCare",
+        o.managedCare,
+        "stayStatus",
+        o.stayStatus,
+        "arrivedAt",
+        o.arrivedAt,
+        "departedAt",
+        o.departedAt);
   }
 
   Map<String, Object> photoMeta(CarePhoto p) {
@@ -844,6 +873,8 @@ public class MarketService {
     order.endsOn = r.endsOn;
     order.totalMinor = o.totalMinor;
     order.status = "CONFIRMED";
+    order.managedCare = workforce.managed(p.id);
+    order.stayStatus = r.kind.equals("BOARDING") ? "EXPECTED" : "NOT_APPLICABLE";
     order.createdAt = clock.instant();
     try {
       order.snapshot =
@@ -912,6 +943,7 @@ public class MarketService {
     r.version++;
     entry(order, null, null, "CONFIRM", note(b));
     access.audit("ORDER_CONFIRM", order.id, order.departmentId);
+    events.publishEvent(new CareSignal(order.id, "CONFIRM", order.version, null));
     return orderSummary(order);
   }
 
@@ -926,6 +958,20 @@ public class MarketService {
     e.note = note;
     e.createdAt = clock.instant();
     return db.save(e);
+  }
+
+  /** 现场交接不可覆盖；接回必须填写实际接回人，私有物品说明不发送邮件。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
+  void handover(CareOrder o, String kind, Map<String, Object> b, String condition) {
+    var h = new CareHandover();
+    h.orderId = o.id;
+    h.departmentId = o.departmentId;
+    h.actorId = access.current().id;
+    h.kind = kind;
+    h.conditionNote = condition;
+    h.belongings = Rules.paragraph(b.get("belongings"), 1800, false);
+    h.recipient = Rules.text(b.get("recipient"), 120, kind.equals("CHECK_OUT"));
+    h.createdAt = clock.instant();
+    db.save(h);
   }
 
   long netPaid(Long id) {
@@ -947,6 +993,8 @@ public class MarketService {
     return map(
         "order",
         orderSummary(o),
+        "today",
+        today(),
         "snapshot",
         snapshot,
         "tasks",
@@ -962,7 +1010,23 @@ public class MarketService {
         "netPaidMinor",
         netPaid(id),
         "reviews",
-        db.query(Review.class, "from Review where orderId=?1", id));
+        db.query(Review.class, "from Review where orderId=?1", id),
+        "assignments",
+        db.query(
+            CareAssignment.class, "from CareAssignment where orderId=?1 order by taskDate", id),
+        "handovers",
+        db.query(CareHandover.class, "from CareHandover where orderId=?1", id),
+        "canCoordinate",
+        access.has("portal") && workforce.coordinate(o),
+        "canUpload",
+        access.has("portal") && workforce.photoActor(o),
+        "taskActionIds",
+        access.has("portal")
+            ? db.query(CareTask.class, "from CareTask where orderId=?1", id).stream()
+                .filter(t -> workforce.taskActor(o, t.taskDate))
+                .map(t -> t.id)
+                .toList()
+            : List.of());
   }
 
   /** 指定双方状态办理；取消、提前结束、争议和回复均追加历史。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
@@ -975,17 +1039,65 @@ public class MarketService {
     var tasks = db.query(CareTask.class, "from CareTask where orderId=?1", id);
     switch (action) {
       case "start" -> {
-        allowed(actor.equals(o.providerAccountId));
+        allowed(workforce.coordinate(o));
+        workforce.coverage(o);
         Rules.check(
             o.status.equals("CONFIRMED")
                 && !today().isBefore(o.startsOn)
                 && today().isBefore(o.endsOn),
             "STATE_INVALID");
         Rules.check(activeAccount(o.ownerId), "PARTICIPANT_DISABLED");
+        if (o.kind.equals("BOARDING") && !o.stayStatus.equals("LEGACY")) {
+          var p = db.get(Provider.class, o.providerId);
+          Rules.check(
+              reservations(p.id).stream()
+                      .filter(
+                          x ->
+                              !x.id.equals(id)
+                                  && x.kind.equals("BOARDING")
+                                  && x.departedAt == null
+                                  && !today().isBefore(x.startsOn)
+                                  && (today().isBefore(x.endsOn) || x.arrivedAt != null))
+                      .count()
+                  < p.boardingCapacity,
+              "CAPACITY_UNAVAILABLE");
+          handover(o, "CHECK_IN", b, text);
+          o.arrivedAt = clock.instant();
+          o.stayStatus = "ARRIVED";
+        }
         o.status = "IN_PROGRESS";
       }
+      case "check-out" -> {
+        allowed(workforce.coordinate(o));
+        Rules.check(
+            o.kind.equals("BOARDING")
+                && o.status.equals("IN_PROGRESS")
+                && o.stayStatus.equals("ARRIVED")
+                && o.departedAt == null,
+            "STATE_INVALID");
+        Rules.check(
+            tasks.stream()
+                .noneMatch(t -> t.status.equals("PENDING") && !t.taskDate.isAfter(today())),
+            "TASKS_PENDING");
+        Rules.check(
+            today().isBefore(o.endsOn) || tasks.stream().anyMatch(t -> t.taskDate.equals(today())),
+            "OVERDUE_TASKS_PENDING");
+        handover(o, "CHECK_OUT", b, text);
+        o.departedAt = clock.instant();
+        o.stayStatus = "DEPARTED";
+        for (var t : tasks)
+          if (t.status.equals("PENDING")) {
+            t.status = "CANCELLED";
+            t.version++;
+          }
+      }
       case "finish" -> {
-        allowed(actor.equals(o.providerAccountId));
+        allowed(workforce.coordinate(o));
+        Rules.check(
+            !o.kind.equals("BOARDING")
+                || o.stayStatus.equals("LEGACY")
+                || o.stayStatus.equals("DEPARTED"),
+            "CHECK_OUT_REQUIRED");
         Rules.check(o.status.equals("IN_PROGRESS"), "STATE_INVALID");
         Rules.check(
             tasks.stream()
@@ -1010,7 +1122,7 @@ public class MarketService {
         o.status = "DISPUTED";
       }
       case "respond" -> {
-        allowed(actor.equals(o.providerAccountId));
+        allowed(workforce.coordinate(o));
         Rules.check(o.status.equals("DISPUTED"), "STATE_INVALID");
         o.status = "REVIEW";
       }
@@ -1028,6 +1140,8 @@ public class MarketService {
     o.version++;
     entry(o, null, null, action.toUpperCase(Locale.ROOT), text);
     access.audit("ORDER_" + action.toUpperCase(Locale.ROOT), id, o.departmentId);
+    events.publishEvent(
+        new CareSignal(id, action.toUpperCase(Locale.ROOT).replace('-', '_'), o.version, null));
     return orderSummary(o);
   }
 
@@ -1035,11 +1149,12 @@ public class MarketService {
   public Object taskAction(Long id, Long taskId, String action, Map<String, Object> b) {
     begin("portal");
     var o = order(id);
-    allowed(o.providerAccountId.equals(access.current().id));
     version(o, b);
     Rules.check(o.status.equals("IN_PROGRESS"), "STATE_INVALID");
     var t = db.get(CareTask.class, taskId);
     Rules.check(t.orderId.equals(id), "TASK_INVALID");
+    allowed(workforce.taskActor(o, t.taskDate));
+    Rules.check(o.departedAt == null, "STATE_INVALID");
     CareEntry e;
     if (action.equals("complete")) {
       Rules.check(t.status.equals("PENDING") && !t.taskDate.isAfter(today()), "TASK_INVALID");
@@ -1253,7 +1368,8 @@ public class MarketService {
     var conditions = new ArrayList<String>();
     if (!(operation && role.scope.equals("ALL"))) {
       args.add(account.id);
-      String scope = "(o.ownerId=?1 or o.providerAccountId=?1";
+      String scope =
+          "(o.ownerId=?1 or o.providerAccountId=?1 or exists (select s.id from ShopStaff s, Provider p, Account pa, Department pd, AccessRole pr where s.providerId=o.providerId and p.id=o.providerId and pa.id=p.accountId and pd.id=pa.departmentId and pr.id=pa.roleId and pa.enabled=true and pd.enabled=true and 'portal' member of pr.permissions and s.accountId=?1 and s.status='ACTIVE' and (s.role='MANAGER' or exists (select a.id from CareAssignment a where a.orderId=o.id and a.accountId=?1)))";
       if (operation) {
         args.add(account.departmentId);
         scope += " or o.departmentId=?2";

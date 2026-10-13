@@ -53,4 +53,13 @@ public class CareOrder extends RecordBase {
 
   @Column(nullable = false)
   public Instant createdAt;
+
+  @Column(nullable = false)
+  public boolean managedCare = false;
+
+  @Column(nullable = false, length = 20)
+  public String stayStatus = "LEGACY";
+
+  public Instant arrivedAt;
+  public Instant departedAt;
 }

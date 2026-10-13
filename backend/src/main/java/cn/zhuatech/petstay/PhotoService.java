@@ -19,13 +19,20 @@ public class PhotoService {
   static final int DAILY_LIMIT = 5;
   static final long TOTAL_LIMIT = 100L * 1024 * 1024;
   final MarketService market;
+  final WorkforceService workforce;
   final Store db;
   final AccessService access;
   final java.time.Clock clock;
 
   /** 使用同一订单权限、版本与事务锁。官网 https://www.zhuatech.cn/；微信 zhuatech / zhuatech2。 */
-  public PhotoService(MarketService market, Store db, AccessService access, java.time.Clock clock) {
+  public PhotoService(
+      MarketService market,
+      Store db,
+      AccessService access,
+      java.time.Clock clock,
+      WorkforceService workforce) {
     this.market = market;
+    this.workforce = workforce;
     this.db = db;
     this.access = access;
     this.clock = clock;
@@ -78,7 +85,8 @@ public class PhotoService {
   public Object upload(Long orderId, String version, String caption, MultipartFile file) {
     market.begin("portal");
     var o = market.order(orderId);
-    market.allowed(o.providerAccountId.equals(access.current().id));
+    market.allowed(workforce.photoActor(o));
+    Rules.check(o.departedAt == null, "STATE_INVALID");
     market.version(o, Map.of("version", version));
     Rules.check(o.status.equals("IN_PROGRESS"), "STATE_INVALID");
     if (file.getSize() > 2 * 1024 * 1024) throw new Problem(413, "FILE_TOO_LARGE");

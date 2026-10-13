@@ -67,6 +67,8 @@ public class Bootstrap implements ApplicationRunner {
       {"requests", "我的需求", "My requests", "portal"},
       {"orders", "照护订单", "Care orders", "portal"},
       {"provider", "提供照护", "Provide care", "portal"},
+      {"shop", "门店与排期", "Shops & schedule", "portal"},
+      {"notifications", "消息与提醒", "Messages & reminders", "portal"},
       {"moderate", "运营审核", "Moderation", "moderate"},
       {"reports", "平台统计", "Reports", "reports"},
       {"users", "登录账号", "Accounts", "users"},
