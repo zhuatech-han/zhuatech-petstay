@@ -10,10 +10,12 @@ Docker Engine与Compose v2，建议4核／8GiB内存／10GiB空闲空间；首�
 python3 scripts/init-env.py
 # 编辑 .env 设置独立 WEB_PORT；初始化脚本生成随机密码，不打印凭据。
 docker compose -p petstay config --quiet
-docker compose -p petstay up -d --build --wait --wait-timeout 240
+docker compose -p petstay up -d --build --wait --wait-timeout 1200
 ```
 
 http://127.0.0.1:8136/；健康检查 http://127.0.0.1:8136/actuator/health 。管理员名来自ADMIN_USERNAME，密码仅在本地.env；无固定公开密码。已有数据库不会被环境变量密码覆盖。MySQL没有主机公开端口；V1/V2/V3自动迁移，无演示业务数据。启动失败查看该项目logs；常见原因是端口冲突、弱管理员密码、镜像网络不可用或旧库迁移冲突，不删除旧卷解决错误。
+
+全新数据库初始化可能受磁盘速度影响，需要数分钟。启动最多等待20分钟；数据库检查保留10分钟初始化宽限，随后最多60次重试，正常就绪后立即继续。宽限不会跳过健康检查。超时查看该项目数据库日志，不恢复出厂设置、不删除旧卷。
 
 ## 配置
 
@@ -34,6 +36,8 @@ python3 scripts/restore.py /secure/path/petstay-backup.zip --project petstay-res
 ```
 
 备份短暂停止该项目后端防止写入，mysqldump含hex-blob；恢复检查成员、大小、哈希，只允许全新项目／卷和localhost绑定，拒绝覆盖旧资源。只恢复可信本地SQL备份。恢复后重新登录并核对订单、照片哈希、任务／报价、款项及权限。源实例仍保留直到核验完成。仅在明确销毁自己的测试实例时才使用带-v的down命令。
+
+恢复时数据库就绪检查最多等待15分钟，先读取容器健康状态，再验证应用数据库账号能执行查询；单次检查最多15秒。初始化期间不反复启动SQL客户端；超时保留独立恢复资源供检查，不覆盖源实例。
 
 ## 升级
 
