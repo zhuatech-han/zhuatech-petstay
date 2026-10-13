@@ -13,7 +13,7 @@ docker compose -p petstay config --quiet
 docker compose -p petstay up -d --build --wait --wait-timeout 1200
 ```
 
-http://127.0.0.1:8136/；健康检查 http://127.0.0.1:8136/actuator/health 。管理员名来自ADMIN_USERNAME，密码仅在本地.env；无固定公开密码。已有数据库不会被环境变量密码覆盖。MySQL没有主机公开端口；V1/V2/V3自动迁移，无演示业务数据。启动失败查看该项目logs；常见原因是端口冲突、弱管理员密码、镜像网络不可用或旧库迁移冲突，不删除旧卷解决错误。
+http://127.0.0.1:8136/；健康检查 http://127.0.0.1:8136/actuator/health 。管理员名来自ADMIN_USERNAME，密码仅在本地.env；无固定公开密码。已有数据库不会被环境变量密码覆盖。MySQL没有主机公开端口；V1/V2/V3/V4自动迁移，无演示业务数据。启动失败查看该项目logs；常见原因是端口冲突、弱管理员密码、镜像网络不可用或旧库迁移冲突，不删除旧卷解决错误。
 
 全新数据库初始化可能受磁盘速度影响，需要数分钟。启动最多等待20分钟；数据库检查保留10分钟初始化宽限，随后最多60次重试，正常就绪后立即继续。宽限不会跳过健康检查。超时查看该项目数据库日志，不恢复出厂设置、不删除旧卷。
 
@@ -44,3 +44,23 @@ python3 scripts/restore.py /secure/path/petstay-backup.zip --project petstay-res
 先备份并试恢复，审查新版本与迁移，构建时Maven测试不可跳过；新增Flyway迁移，禁止改历史版本，启动后检查健康及完整业务。Session为内存存储，重启会退出登录。当前单应用实例，不配置多个副本。
 
 V3只新增订单与照片查询索引及字典版本字段，保留V1/V2原文；不覆盖旧订单快照、照片字节和线下款项。
+
+## SMTP与提醒
+
+邮件默认关闭。部署方在本机受限.env设置MAIL_ENABLED、MAIL_HOST、MAIL_PORT、MAIL_USERNAME、MAIL_PASSWORD、MAIL_FROM和MAIL_TLS，重建本项目后端。MAIL_TLS=REQUIRED要求STARTTLS并验证服务器身份；SSL使用隐式TLS；NONE仅用于隔离本地SMTP测试。网络连接、读取及写入各限5秒。不把SMTP账号、密码或验证码上传Git。会员验证邮箱并主动开启邮件后才进入出站队列，提醒时间为平台运营时区整点（默认上海）。
+
+单实例任务每30秒扫描，站内消息永久保留至部署方制定归档策略。邮件失败最多自动尝试五次，以120/240/480/960秒退避；最终失败可在本人消息中有限重试，总尝试次数最多十次。服务重启后未完成发送租约120秒可再次投递，可能重复邮件；收件箱到达、外部SMTP资费、反垃圾策略与真实域名发信信誉需要部署方核验。短信与微信消息未接入。
+
+V4升级保留V1–V3原文和旧业务数据；旧订单LEGACY模式不补造入住/接回。门店历史和通知也在同一数据库备份内。升级前在独立恢复实例验证新菜单、员工权限、旧订单及新的入住交接。
+
+## 独立主机数据目录（可选）
+
+默认使用Docker命名卷。如果Docker数据盘延迟过高，可在本机受限.env设置PETSTAY_MYSQL_DATA_DIR为独立、已创建的空目录绝对路径，通过可选覆盖文件使用另一块存储，不改变Docker全局数据位置：
+
+```sh
+docker compose -p petstay -f compose.yaml -f compose.storage.yaml config --quiet
+docker compose -p petstay -f compose.yaml -f compose.storage.yaml up -d --build --wait --wait-timeout 1200
+python3 scripts/backup.py --project petstay --compose-file compose.yaml --compose-file compose.storage.yaml --output /secure/path/petstay-backup.zip
+```
+
+恢复时准备另一个独立空目录并在受限恢复.env设置其PETSTAY_MYSQL_DATA_DIR；运行restore.py时同样追加两个--compose-file参数。脚本拒绝非空绑定目录、符号链接、外部网络、共享卷和额外应用挂载，禁止指向源实例目录。绑定目录的权限、磁盘空间、备份及保留由部署方管理；不自动迁移已有命名卷，不删除源数据。
