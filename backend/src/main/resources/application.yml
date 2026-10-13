@@ -43,6 +43,14 @@ management:
       exposure:
         include: health
 petstay:
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:}
+    tls: ${MAIL_TLS:REQUIRED}
   admin-username: ${ADMIN_USERNAME:admin}
   admin-password: ${ADMIN_PASSWORD}
 # Hibernate 的连接描述可能包含驱动展开的连接参数；不得输出凭证或业务约束原值。
