@@ -104,10 +104,12 @@ Docker Engine、Compose v2、Python 3.10+；建议4核、8GiB内存及10GiB空�
 ```sh
 python3 scripts/init-env.py
 docker compose -p petstay config --quiet
-docker compose -p petstay up -d --build --wait --wait-timeout 240
+docker compose -p petstay up -d --build --wait --wait-timeout 1200
 ```
 
 访问 http://127.0.0.1:8136/ ，健康检查 http://127.0.0.1:8136/actuator/health 。初始化脚本拒绝覆盖已有.env；随机密码仅保存在本机.env（0600），不打印、不提交。管理员名默认admin，密码读取ADMIN_PASSWORD，**没有固定公开密码**。已有账号密码不会被环境变量覆盖。构建后端必跑测试，前端必跑格式、lint、测试和构建。
+
+全新数据库在慢盘上初始化可能需要数分钟。启动最多等待20分钟；数据库健康检查保留10分钟初始化宽限，检查成功后立即继续，不固定等待10分钟。超时请查看本项目日志并处理原因，不删除数据卷重试。
 
 ### 数据库初始化与升级
 
@@ -155,6 +157,8 @@ python3 scripts/smoke.py --base http://127.0.0.1:8136 --mode seed --state /priva
 [部署与恢复](docs/deployment.md)包含HTTPS、独立域名、环境配置、受限备份和全新实例恢复。备份包含私有资料，脚本短暂停止指定后端、保留图片二进制，禁止公开上传。密码弱或端口冲突会导致启动失败，应查看本项目日志；镜像下载失败先检查网络，不删除原数据卷。会话30分钟或服务重启会重新登录；版本冲突先刷新核对再提交。
 
 手机布局已提供；公众号账号、HTTPS域名和实际微信设备准备后可接入H5链接。**当前未部署公网、未接入微信登录／支付、未提供原生小程序**。详见 [手机H5与微信接入](docs/wechat-H5.md)。
+
+恢复脚本最多等待15分钟检查数据库就绪，先读取容器健康状态，再验证应用账号连接；单次检查最多15秒。初始化期间不反复启动SQL客户端，超时保留独立恢复资源供排查，不覆盖源实例。
 
 ## 安全与已知限制
 

@@ -104,10 +104,12 @@ From the repository root:
 ```sh
 python3 scripts/init-env.py
 docker compose -p petstay config --quiet
-docker compose -p petstay up -d --build --wait --wait-timeout 240
+docker compose -p petstay up -d --build --wait --wait-timeout 1200
 ```
 
 Open http://127.0.0.1:8136/ ; health: http://127.0.0.1:8136/actuator/health . Initialization refuses to overwrite `.env`. Random passwords stay in the local `.env` (0600), are not printed or committed. Default administrator username is `admin`; read `ADMIN_PASSWORD` locally. **No fixed public password.** Environment values do not reset existing account passwords. Backend builds run tests; frontend builds run formatting, lint, tests and build.
+
+Initializing a new database on slower storage can take several minutes. Startup waits up to 20 minutes; database health checks allow a 10-minute initialization grace period and continue immediately when healthy. This is not a fixed 10-minute delay. On timeout, inspect this project's logs and resolve the cause; do not delete data volumes to retry.
 
 ### Database initialization and upgrades
 
@@ -155,6 +157,8 @@ The script verifies registration privilege rejection, matching and quotes, concu
 [Deployment and restore](docs/deployment.md) covers HTTPS, an independent domain, configuration, private backups and isolated restore. Backups contain private data; the script briefly stops the named backend and retains image bytes. Never upload backups publicly. Weak passwords and port conflicts prevent startup; inspect this project's logs. Registry/network failure should be diagnosed without deleting original data volumes. Sessions expire after 30 minutes or application restart. On version conflict, refresh and review before resubmitting.
 
 Responsive mobile layout is implemented. A prepared public account, HTTPS domain and actual WeChat device verification allow connecting an H5 link. **No public deployment, WeChat login/payment or native mini program has been delivered.** See [mobile H5 and WeChat](docs/wechat-H5.md).
+
+During restore, readiness checks wait up to 15 minutes, polling container health before verifying the application database account. Each probe has a 15-second limit. SQL clients are not repeatedly started during initialization. A timeout retains the isolated restore resources for diagnosis and does not overwrite the source instance.
 
 ## Security and known limitations
 
